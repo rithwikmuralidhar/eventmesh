@@ -1,59 +1,47 @@
 # EventMesh progress
 
-The specification is [PROMPT.md](PROMPT.md) (replaced 2026-11-12 with the Windows-native / Memurai / Tailwind v4 /
-milestone-11 version). The project root is `C:\Users\Testing\Desktop\eventmesh\eventmesh` (a nested folder).
+Specification: [PROMPT.md](PROMPT.md). Project root: `C:\Users\Testing\Desktop\eventmesh\eventmesh` (nested folder).
 
-## Status (checkpoint 2026-11-12, third session)
+## Status (checkpoint 2026-11-12, fourth session): milestones 1-10 done, 11 not built
 
-Machine: Windows 11, Go 1.27.4, Node 26.13.1, Git 2.56, Memurai (Redis 7.2.5), PostgreSQL 18.7 (under `E:\Program Files\PostgreSQL\18`).
-Role/database `eventmesh` created with `scripts\init-db.ps1` (dev password `eventmesh`). **No `gcc`, so `-race` has not been run.**
+Machine: Windows 11, i7-11850H, 32 GB, Go 1.27.4, Node 26.13.1, PostgreSQL 18.7, Memurai (Redis 7.2.5). DB role `eventmesh` created with `scripts\init-db.ps1`.
 
-| # | Milestone | Gate |
+| # | Milestone | Gate result |
 | --- | --- | --- |
-| 1 | Skeleton | **passed**: `scripts\check-prereqs.ps1` all PASS; `scripts\migrate.ps1`, `-Down`, again: ok; Lua EVAL with `redis.call`+`TIME` ok on Memurai. Still missing: `.github/workflows/ci.yml`, `.golangci.yml` |
-| 2 | Accounts | **passed** (integration): sessions/CSRF/logout, same error for unknown email vs wrong password, API key valid/missing/malformed/wrong scheme/revoked |
-| 3 | Endpoints + ingestion | **passed** (integration): idempotency table, 50 concurrent requests -> 1 event, non-matching event -> 0 deliveries, private/metadata destinations rejected |
-| 4 | Delivery engine | **passed live**: seed + `scripts\start-stack.ps1 -NoFrontend`, `Invoke-RestMethod` event -> 3 deliveries; receiver verified 237/237 signatures; flaky hook failed twice then 200 |
-| 5 | Reliability | **passed except `-race`**: retries -> dead letter -> replay (attempts kept, trigger=replay), 4xx straight to dead letter, 4 workers x 150 deliveries each sent exactly once, crashed worker recovered after lease, full Redis key loss recovered by reconciler, enqueue failure recovered, rate-limited deferral records no attempt, disabled endpoint -> cancelled, goleak after graceful stop |
-| 6 | Read API + SSE | **passed**: SSE test (owner receives `event.created` and `delivered`, other user receives nothing), audit-log scoping, 401 on every management route, user-B 404 matrix, same-origin CSRF fix; OpenAPI (`docs/openapi.yaml`, copy embedded and checked by a unit test) with Swagger UI at `/docs` (HTTP 200 verified) |
-| 7 | Frontend | **passed**: `npm run build` (tsc + Vite; built CSS 14 KB contains only used utilities), `npx tsc --noEmit` clean, `npx eslint .` clean, `npx vitest run` 10/10; manual walk against the running stack through the API-served build: login, Overview (real data, Live indicator), Endpoints, Events, Deliveries (+filter in URL), delivery detail (explanation, headers, attempt timeline, Replay), API keys, Activity, Settings. Not manually exercised: create/rotate/delete flows, light theme, mobile width |
-| 8 | End to end | `start-stack.ps1`/`stop-stack.ps1` work (no orphans); **Playwright flow, `playwright.config.ts`, CI not written** |
-| 9 | Observability + performance | metrics endpoints exist; **loadtest CLI, logging-audit test, experiments not done** |
-| 10 | Docs + final verification | not started |
-| 11 | AI features | not started (optional) |
+| 1 | Skeleton | passed: `scripts\check-prereqs.ps1` all PASS; migrate up/down/up ok; Lua `redis.call`+`TIME` ok on Memurai (`go run ./cmd/redischeck`) |
+| 2-3 | Accounts, endpoints, ingestion | passed (integration tests incl. 50 concurrent idempotent requests) |
+| 4 | Delivery engine | passed live (237/237 signatures verified by the receiver) |
+| 5 | Reliability | passed except **`-race` not run (no `gcc`)** |
+| 6 | Read API, SSE, OpenAPI | passed (SSE isolation, audit scoping, 404 matrix, `/docs`) |
+| 7 | Frontend | passed: build, tsc, eslint, 10 Vitest tests, manual walk of every page |
+| 8 | End to end | passed: `scripts\test-e2e.ps1` -> Playwright 1 test passed (3.4 s); stack stops cleanly with no orphans. CI workflow written, **not executed** (no GitHub run) |
+| 9 | Observability + performance | passed: metrics on :9090 and :9091 show real values; log-leak test passes; load test + 7 runs recorded in `docs/performance.md` |
+| 10 | Docs + final verification | docs written; **clean clone** (`git clone` to a temp dir): `go build`, `go vet`, `go test ./internal/...`, `go test ./tests` (all pass), `npm ci`, `npm run build`, `vitest` (10/10), `eslint` clean |
+| 11 | AI features | **not built** (optional); ADR-020 |
 
 Commands that produced results:
+- `cd backend; $env:EM_TEST_DATABASE_URL='postgres://eventmesh:eventmesh@127.0.0.1:5432/postgres?sslmode=disable'; $env:EM_TEST_REDIS_URL='redis://127.0.0.1:6379/1'; go test -count=1 ./...` -> all ok (integration ~16 s, 30+ tests).
+- `scripts\test-e2e.ps1` (run in background from the assistant tool) -> `1 passed`.
+- `scripts\run-experiments.ps1 -Events 1000` -> `loadtest-results\*.json`.
 
-- `go build ./...`, `go vet ./...` (backend): clean. `go test -count=1 ./internal/...`: pass.
-- `$env:EM_TEST_DATABASE_URL='postgres://eventmesh:eventmesh@127.0.0.1:5432/postgres?sslmode=disable'; $env:EM_TEST_REDIS_URL='redis://127.0.0.1:6379/1'; go test -count=1 -v ./tests` (in `backend`): all 25 tests pass (~12 s).
-- `scripts\stop-stack.ps1` after the live demo: no `api`/`worker`/`receiver` processes left, `.run\` empty.
+## Not verified / not done
+
+- `go test -race` never run locally (no C compiler); `golangci-lint` not installed so `scripts\lint.ps1` ran only gofmt, `go vet`, tsc, eslint; CI would run both.
+- `.github/workflows/ci.yml` and `sqlc generate` diff check never executed (no sqlc installed; `internal/database/db` was committed as generated before).
+- `scripts\setup.ps1`, `scripts\test.ps1`, `scripts\lint.ps1`, `scripts\test-integration.ps1`, `scripts\sqlc.ps1` were written but not each executed end to end (their steps were run directly).
+- `start-stack.ps1` blocks when started from an automation tool (inherited output handles); fine in a normal terminal, not verified there. README demo snippet `scripts\demo-key.ps1 | Select-Object -Last 1` was exercised via the same code path, not copied verbatim.
+- Light theme, mobile width and create/rotate/delete UI flows were not exercised manually (Vitest covers create + one-time secret, API key reveal/revoke).
+- Performance: single runs, no repeats; the bottleneck above ~10 workers is *not* isolated (see performance.md).
+- Milestone 11 (Gemini RAG / explanations / NL search) and pgvector: not started.
 
 ## Next action
 
-Milestone 8: `frontend/playwright.config.ts` + `frontend/e2e/flow.spec.ts` (the 10-step flow in PROMPT.md section 12; receiver hook `switch/e2e` needs the endpoint secret registered via `PUT /control/secret/:name` - not implemented yet, or set `EM_RECEIVER_SECRET` per hook), `scripts/test-e2e.ps1`, `.github/workflows/ci.yml`, `.golangci.yml`, then milestones 9-10.
+If continuing: install a C toolchain and `golangci-lint`, run `scripts\lint.ps1` and `scripts\test.ps1` (with `-race`); push to GitHub to run CI; then, optionally, milestone 11.
 
-## Open problems
+## Decisions
 
-- `-race` not run (install MSYS2/TDM-GCC; `scripts\test.ps1` and `test-integration.ps1` pick up `gcc` automatically).
-- `start-stack.ps1` run from the assistant's tool blocks until the child processes exit (inherited output handles); it works fine from a normal terminal - not yet verified there.
-- Not written: `cmd/loadtest`, `.github/workflows/ci.yml`, `.golangci.yml`, `docker-compose.yml`, README, docs (windows-setup, architecture, database, reliability, security, performance, interview-guide), Playwright.
-- `docs/openapi.yaml` query param for event ID search is documented as `q` but the API uses `id`: fix the spec and re-copy to `backend/internal/httpapi/swagger/openapi.yaml`.
-- Receiver signature check uses one default secret; an e2e test creating its own endpoint (random secret) needs a way to register that secret with the receiver.
-- `internal/database/db/*.go` is the sqlc output kept in the repo; `sqlc` is not installed here, so `scripts\sqlc.ps1` / CI diff check unverified.
-- Port 8080 is taken by an unrelated `httpd`; dev API port is 8090 (ADR-003). Seed uses `EM_RECEIVER_BASE_URL` default `http://127.0.0.1:9000`.
+ADR-001..020 in `docs/design-decisions.md` (API dev port 8090 instead of 8080; `EM_` variables; Redis key prefix; same-origin CSRF rule; seed-only secret; receiver `PUT /control/secret/:name` and `PUT /control/switch/:name?mode=`).
 
-## Decisions made this session
+## Files that matter
 
-ADR-001..005 in `docs/design-decisions.md`. New this session: `endpoints.Service.CreateWithSecret` (seed only, not routed) so demo endpoints share
-`EM_RECEIVER_SECRET` with the receiver; test harness builds `httpapi.New` directly with an optional deps hook to inject a failing queue.
-
-## Fixed this session (found by the browser walk)
-
-- CSRF origin check rejected the API's own origin when it serves the frontend; `middleware.sameOrigin` now allows it (integration test `TestCSRFOriginCheckAllowsSameOriginAndRejectsOthers`).
-
-## Files that matter now
-
-- `backend/internal/httpapi/router.go`, `backend/internal/workers/process.go`, `backend/internal/realtime/realtime.go`
-- `backend/tests/stack_test.go` (harness), `backend/tests/reliability_test.go`, `backend/tests/delivery_test.go`, `backend/tests/queue_test.go`
-- `backend/cmd/{api,worker,receiver,seed}/main.go`, `scripts/*.ps1`, `.env.example`
-- `docs/PROMPT.md` sections 10 (frontend), 6 (API), 13-15 for what's next
+`backend/internal/{workers,queue,ratelimit,realtime,httpapi,events,deliveries,endpoints}`, `backend/tests/*`, `backend/cmd/*`, `frontend/src/pages/*`, `frontend/e2e/flow.spec.ts`, `scripts/*.ps1`, `.env.example`, `docs/*`.
