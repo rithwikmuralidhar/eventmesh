@@ -43,8 +43,9 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
+          version: v2.15.0
           working-directory: backend
       - name: sqlc generate must not change committed code
         run: |
