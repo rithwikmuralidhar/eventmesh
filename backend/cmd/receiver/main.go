@@ -39,6 +39,7 @@ type server struct {
 
 	mu       sync.Mutex
 	switches map[string]string // hook name -> mode
+	secrets  map[string]string // hook name -> secret registered at runtime
 	seen     map[string]int    // delivery id -> requests seen, for /flaky
 	recorded []Recorded
 }
@@ -47,12 +48,13 @@ func main() {
 	addr := getenv("EM_RECEIVER_ADDR", "127.0.0.1:9000")
 	s := &server{
 		defaultSecret: os.Getenv("EM_RECEIVER_SECRET"),
-		switches:      map[string]string{}, seen: map[string]int{},
+		switches:      map[string]string{}, secrets: map[string]string{}, seen: map[string]int{},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /hooks/{kind}", s.hook)
 	mux.HandleFunc("POST /hooks/switch/{name}", s.hook)
 	mux.HandleFunc("PUT /control/switch/{name}", s.setSwitch)
+	mux.HandleFunc("PUT /control/secret/{name}", s.setSecret)
 	mux.HandleFunc("GET /control/requests", s.requests)
 	mux.HandleFunc("DELETE /control/requests", func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
@@ -68,6 +70,12 @@ func main() {
 }
 
 func (s *server) secretFor(hook string) string {
+	s.mu.Lock()
+	registered := s.secrets[hook]
+	s.mu.Unlock()
+	if registered != "" {
+		return registered
+	}
 	if v := os.Getenv("EM_RECEIVER_SECRET_" + hook); v != "" {
 		return v
 	}
@@ -179,6 +187,22 @@ func (s *server) setSwitch(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.switches[r.PathValue("name")] = mode
+	s.mu.Unlock()
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// setSecret registers the signing secret to verify a hook with, for tests that
+// create an endpoint (and so receive a random secret) at run time.
+func (s *server) setSecret(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Secret string `json:"secret"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&in); err != nil || in.Secret == "" {
+		http.Error(w, `body must be {"secret": "..."}`, http.StatusBadRequest)
+		return
+	}
+	s.mu.Lock()
+	s.secrets[r.PathValue("name")] = in.Secret
 	s.mu.Unlock()
 	w.WriteHeader(http.StatusNoContent)
 }

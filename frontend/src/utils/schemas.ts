@@ -56,8 +56,8 @@ export const endpointSchema = z.object({
       'Rate limit must be a whole number from 1 to 1000',
     ),
   max_retries: optionalInt(0, 20, 'Max retries'),
-  initial_retry_delay_ms: optionalInt(1, 3_600_000, 'Initial delay'),
-  max_retry_delay_ms: optionalInt(1, 86_400_000, 'Max delay'),
+  initial_retry_delay_ms: optionalInt(100, 3_600_000, 'Initial delay'),
+  max_retry_delay_ms: optionalInt(100, 86_400_000, 'Max delay'),
   enabled: z.boolean(),
 })
 export type EndpointForm = z.infer<typeof endpointSchema>

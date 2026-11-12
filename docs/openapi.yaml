@@ -223,7 +223,7 @@ paths:
         - { name: status, in: query, schema: { $ref: "#/components/schemas/EventStatus" } }
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }
-        - { name: q, in: query, description: Event ID prefix, schema: { type: string } }
+        - { name: id, in: query, description: Event ID prefix, schema: { type: string } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Page" } } } }
         "400": { $ref: "#/components/responses/Error" }

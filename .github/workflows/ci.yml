@@ -1,0 +1,138 @@
+name: ci
+
+# Runs on Linux with PostgreSQL and Redis service containers. Memurai is
+# Windows-only, so CI uses Redis; the commands EventMesh uses are the same.
+# The Memurai-specific check is `go run ./cmd/redischeck` on the developer's machine.
+on:
+  push:
+  pull_request:
+
+env:
+  EM_DATABASE_URL: postgres://eventmesh:eventmesh@127.0.0.1:5432/eventmesh?sslmode=disable
+  EM_TEST_DATABASE_URL: postgres://eventmesh:eventmesh@127.0.0.1:5432/postgres?sslmode=disable
+  EM_REDIS_URL: redis://127.0.0.1:6379/0
+  EM_TEST_REDIS_URL: redis://127.0.0.1:6379/1
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: eventmesh
+          POSTGRES_PASSWORD: eventmesh
+          POSTGRES_DB: eventmesh
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U eventmesh" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: backend
+      - name: sqlc generate must not change committed code
+        run: |
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+          sqlc generate
+          git diff --exit-code -- internal/database/db
+      - name: Unit tests (race detector)
+        run: go test -race -count=1 ./internal/...
+      - name: Integration tests (race detector)
+        run: go test -race -count=1 ./tests/...
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx eslint .
+      - run: npx prettier --check src
+      - run: npx vitest run
+      - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: eventmesh
+          POSTGRES_PASSWORD: eventmesh
+          POSTGRES_DB: eventmesh
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U eventmesh" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      EM_ENV: development
+      EM_HTTP_ADDR: 127.0.0.1:8090
+      EM_RECEIVER_ADDR: 127.0.0.1:9000
+      EM_SSRF_ALLOWED_HOSTS: 127.0.0.1
+      EM_SERVE_FRONTEND: 'true'
+      EM_FRONTEND_DIR: ../frontend/dist
+      EM_INITIAL_RETRY_DELAY: 200ms
+      EM_MAX_RETRY_DELAY: 1s
+      EM_MAX_RETRIES: '2'
+      EM_RECONCILER_INTERVAL: 2s
+      EM_RECONCILER_GRACE: 2s
+      EM_AUTH_RATE_LIMIT_PER_MINUTE: '1000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build backend binaries and frontend
+        run: |
+          mkdir -p bin
+          (cd backend && go build -o ../bin/ ./cmd/api ./cmd/worker ./cmd/receiver ./cmd/migrate)
+          (cd frontend && npm ci && npm run build && npx playwright install --with-deps chromium)
+      - name: Start the stack
+        working-directory: backend
+        run: |
+          ../bin/migrate
+          nohup ../bin/receiver > ../receiver.log 2>&1 &
+          nohup ../bin/worker > ../worker.log 2>&1 &
+          nohup ../bin/api > ../api.log 2>&1 &
+          for i in $(seq 1 40); do curl -sf http://127.0.0.1:8090/readyz && break || sleep 0.5; done
+      - name: Playwright
+        working-directory: frontend
+        run: npx playwright test
+      - name: Logs on failure
+        if: failure()
+        run: tail -n 100 api.log worker.log receiver.log

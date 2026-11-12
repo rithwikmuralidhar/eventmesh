@@ -25,4 +25,4 @@ Start-Part 'api' (Join-Path $bin 'api.exe') @() $script:Backend
 if (-not $NoFrontend -and (Test-Path (Join-Path $script:Frontend 'package.json'))) {
     Start-Part 'frontend' (Get-Command npm.cmd).Source @('run', 'dev') $script:Frontend
 }
-Write-Host 'API http://127.0.0.1:8080  receiver http://127.0.0.1:9000  UI http://127.0.0.1:3000'
+Write-Host "API http://$($env:EM_HTTP_ADDR)  receiver http://$($env:EM_RECEIVER_ADDR)  UI http://127.0.0.1:3000"
