@@ -215,6 +215,18 @@ func dedupe(in []string) []string {
 // Create stores a new endpoint and returns it with its signing secret. This
 // return value and RotateSecret are the only places the secret appears.
 func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateInput) (Endpoint, string, error) {
+	return s.create(ctx, userID, in, "")
+}
+
+// CreateWithSecret is Create with a caller-chosen signing secret. It exists
+// for the seed command, which must give demo endpoints the secret the local
+// receiver verifies with; it is not reachable from any HTTP route.
+func (s *Service) CreateWithSecret(ctx context.Context, userID uuid.UUID, in CreateInput, secret string) (Endpoint, error) {
+	ep, _, err := s.create(ctx, userID, in, secret)
+	return ep, err
+}
+
+func (s *Service) create(ctx context.Context, userID uuid.UUID, in CreateInput, fixedSecret string) (Endpoint, string, error) {
 	set := settings{
 		name: in.Name, url: in.URL, eventTypes: in.EventTypes, enabled: true, rateLimit: DefaultRateLimit,
 		maxRetries: in.MaxRetries, initialMS: in.InitialRetryDelayMS, maxMS: in.MaxRetryDelayMS,
@@ -229,7 +241,7 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateInput) 
 		return Endpoint{}, "", err
 	}
 
-	secret, ciphertext, err := s.newSecret()
+	secret, ciphertext, err := s.newSecret(fixedSecret)
 	if err != nil {
 		return Endpoint{}, "", err
 	}
@@ -259,10 +271,12 @@ func (s *Service) Create(ctx context.Context, userID uuid.UUID, in CreateInput) 
 	return toEndpoint(row), secret, nil
 }
 
-func (s *Service) newSecret() (plaintext string, ciphertext []byte, err error) {
-	plaintext, err = GenerateSecret()
-	if err != nil {
-		return "", nil, err
+func (s *Service) newSecret(fixed string) (plaintext string, ciphertext []byte, err error) {
+	plaintext = fixed
+	if plaintext == "" {
+		if plaintext, err = GenerateSecret(); err != nil {
+			return "", nil, err
+		}
 	}
 	ciphertext, err = s.cipher.Encrypt(plaintext)
 	if err != nil {
@@ -411,7 +425,7 @@ func applyPatch(set *settings, in UpdateInput) []string {
 
 // RotateSecret replaces the signing secret and returns the new one, once.
 func (s *Service) RotateSecret(ctx context.Context, userID, id uuid.UUID) (string, error) {
-	secret, ciphertext, err := s.newSecret()
+	secret, ciphertext, err := s.newSecret("")
 	if err != nil {
 		return "", err
 	}
