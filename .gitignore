@@ -1,0 +1,9 @@
+.env
+logs/
+.run/
+bin/
+*.exe
+node_modules/
+frontend/dist/
+loadtest-results/
+.claude/
