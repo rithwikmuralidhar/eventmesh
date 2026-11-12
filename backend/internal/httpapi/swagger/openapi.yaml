@@ -1,0 +1,374 @@
+openapi: 3.0.3
+info:
+  title: EventMesh API
+  version: 1.0.0
+  description: |
+    Webhook delivery and event processing. Dashboard routes use the `eventmesh_session` cookie and require the
+    header `X-Requested-With` on state-changing requests (CSRF defence). Event ingestion uses an API key.
+    Delivery is at-least-once: consumers must deduplicate on `X-EventMesh-Delivery-Id`.
+servers:
+  - url: /api/v1
+tags:
+  - name: Auth
+  - name: Ingestion
+  - name: Events
+  - name: Deliveries
+  - name: Endpoints
+  - name: API keys
+  - name: Dashboard
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: eventmesh_session
+    apiKey:
+      type: http
+      scheme: bearer
+      description: "An EventMesh API key (`em_...`)."
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from `next_cursor`.
+      schema: { type: string }
+    From:
+      name: from
+      in: query
+      schema: { type: string, format: date-time }
+    To:
+      name: to
+      in: query
+      schema: { type: string, format: date-time }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Not found, or owned by another user.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object, additionalProperties: true }
+            request_id: { type: string }
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 10 }
+    Endpoint:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        url: { type: string, format: uri }
+        event_types: { type: array, items: { type: string }, description: "Exact types, `prefix.*` or `*`." }
+        enabled: { type: boolean }
+        rate_limit_per_second: { type: integer, minimum: 1, maximum: 1000 }
+        max_retries: { type: integer, nullable: true }
+        initial_retry_delay_ms: { type: integer, nullable: true }
+        max_retry_delay_ms: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        stats:
+          type: object
+          properties:
+            total: { type: integer }
+            delivered: { type: integer }
+            dead_letter: { type: integer }
+            in_progress: { type: integer }
+            cancelled: { type: integer }
+    EndpointInput:
+      type: object
+      required: [name, url, event_types]
+      properties:
+        name: { type: string }
+        url: { type: string, format: uri }
+        event_types: { type: array, minItems: 1, items: { type: string } }
+        enabled: { type: boolean }
+        rate_limit_per_second: { type: integer }
+        max_retries: { type: integer, nullable: true }
+        initial_retry_delay_ms: { type: integer, nullable: true }
+        max_retry_delay_ms: { type: integer, nullable: true }
+    DeliveryStatus:
+      type: string
+      enum: [pending, processing, retry_scheduled, delivered, dead_letter, cancelled]
+    EventStatus:
+      type: string
+      enum: [no_subscribers, in_progress, delivered, failed]
+    IngestResult:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/EventStatus" }
+        deliveries: { type: integer }
+        created_at: { type: string, format: date-time }
+    Page:
+      type: object
+      properties:
+        items: { type: array, items: { type: object, additionalProperties: true } }
+        next_cursor: { type: string, nullable: true }
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Create an account and start a session
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Credentials" } } }
+      responses:
+        "201": { description: Created }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Start a session
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Credentials" } } }
+      responses:
+        "200": { description: Signed in }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      security: [{ session: [] }]
+      summary: End the session
+      responses: { "204": { description: Signed out } }
+  /auth/me:
+    get:
+      tags: [Auth]
+      security: [{ session: [] }]
+      summary: Current user
+      responses:
+        "200": { description: OK }
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      security: [{ session: [] }]
+      summary: Change password and end other sessions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 10 }
+      responses: { "204": { description: Changed } }
+  /events:
+    post:
+      tags: [Ingestion]
+      security: [{ apiKey: [] }]
+      summary: Ingest an event
+      description: |
+        Stores the event and one delivery per matching endpoint in one transaction, then returns without waiting
+        for delivery. With `Idempotency-Key`: same key and body returns `200` with `Idempotent-Replayed: true`;
+        same key and a different body returns `409 idempotency_key_conflict`.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_type, payload]
+              properties:
+                event_type: { type: string, pattern: '^[a-z0-9_]+(\.[a-z0-9_]+)*$', maxLength: 100 }
+                payload: { type: object, additionalProperties: true }
+      responses:
+        "202": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/IngestResult" } } } }
+        "200": { description: Idempotent replay, content: { application/json: { schema: { $ref: "#/components/schemas/IngestResult" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+    get:
+      tags: [Events]
+      security: [{ session: [] }]
+      summary: Event history
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: event_type, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/EventStatus" } }
+        - { $ref: "#/components/parameters/From" }
+        - { $ref: "#/components/parameters/To" }
+        - { name: q, in: query, description: Event ID prefix, schema: { type: string } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Page" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /events/{id}:
+    get:
+      tags: [Events]
+      security: [{ session: [] }]
+      summary: Event with payload and deliveries
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: OK }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /deliveries:
+    get:
+      tags: [Deliveries]
+      security: [{ session: [] }]
+      summary: Delivery explorer
+      parameters:
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/DeliveryStatus" } }
+        - { name: endpoint_id, in: query, schema: { type: string, format: uuid } }
+        - { name: event_type, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/From" }
+        - { $ref: "#/components/parameters/To" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Page" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /deliveries/{id}:
+    get:
+      tags: [Deliveries]
+      security: [{ session: [] }]
+      summary: Delivery with its full attempt history
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: OK }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /deliveries/{id}/replay:
+    post:
+      tags: [Deliveries]
+      security: [{ session: [] }]
+      summary: Replay a dead-lettered delivery
+      description: Resets the same delivery to `pending`; attempt history is kept. `409` unless the delivery is `dead_letter` and its endpoint is enabled.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: Replayed }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Error" }
+  /endpoints:
+    post:
+      tags: [Endpoints]
+      security: [{ session: [] }]
+      summary: Create an endpoint (the signing secret is returned once)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/EndpointInput" } } }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  endpoint: { $ref: "#/components/schemas/Endpoint" }
+                  secret: { type: string }
+        "422": { $ref: "#/components/responses/Error" }
+    get:
+      tags: [Endpoints]
+      security: [{ session: [] }]
+      summary: List endpoints with delivery statistics
+      responses: { "200": { description: OK } }
+  /endpoints/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      tags: [Endpoints]
+      security: [{ session: [] }]
+      summary: Endpoint detail
+      responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }
+    patch:
+      tags: [Endpoints]
+      security: [{ session: [] }]
+      summary: Update an endpoint
+      requestBody:
+        content: { application/json: { schema: { $ref: "#/components/schemas/EndpointInput" } } }
+      responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }
+    delete:
+      tags: [Endpoints]
+      security: [{ session: [] }]
+      summary: Soft-delete an endpoint and cancel its open deliveries
+      responses: { "204": { description: Deleted }, "404": { $ref: "#/components/responses/NotFound" } }
+  /endpoints/{id}/rotate-secret:
+    post:
+      tags: [Endpoints]
+      security: [{ session: [] }]
+      summary: Replace the signing secret (returned once)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/NotFound" } }
+  /api-keys:
+    post:
+      tags: [API keys]
+      security: [{ session: [] }]
+      summary: Create an API key (shown once)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } }
+      responses: { "201": { description: Created } }
+    get:
+      tags: [API keys]
+      security: [{ session: [] }]
+      summary: List API keys
+      responses: { "200": { description: OK } }
+  /api-keys/{id}:
+    delete:
+      tags: [API keys]
+      security: [{ session: [] }]
+      summary: Revoke an API key
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses: { "204": { description: Revoked }, "404": { $ref: "#/components/responses/NotFound" } }
+  /dashboard/stats:
+    get:
+      tags: [Dashboard]
+      security: [{ session: [] }]
+      summary: Totals, success rate, time series and recent failures
+      parameters:
+        - { name: range, in: query, schema: { type: string, enum: [24h, 7d, 30d], default: 24h } }
+      responses: { "200": { description: OK } }
+  /settings:
+    get:
+      tags: [Dashboard]
+      security: [{ session: [] }]
+      summary: Read-only system retry defaults and limits
+      responses: { "200": { description: OK } }
+  /audit-logs:
+    get:
+      tags: [Dashboard]
+      security: [{ session: [] }]
+      summary: Account activity
+      parameters: [{ $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/Cursor" }]
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Page" } } } } }
+  /stream:
+    get:
+      tags: [Dashboard]
+      security: [{ session: [] }]
+      summary: Server-Sent Events of live updates
+      description: Events `delivery.updated` and `event.created` carry IDs and status only; a comment heartbeat is sent every 15 s.
+      responses:
+        "200": { description: Event stream, content: { text/event-stream: { schema: { type: string } } } }

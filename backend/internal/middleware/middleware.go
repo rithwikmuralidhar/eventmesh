@@ -138,13 +138,21 @@ func CSRF(allowedOrigins []string) gin.HandlerFunc {
 			return
 		}
 		if origin := c.GetHeader("Origin"); origin != "" {
-			if _, ok := allowed[origin]; !ok {
+			if _, ok := allowed[origin]; !ok && !sameOrigin(c.Request, origin) {
 				httpx.WriteError(c, httpx.NewError(http.StatusForbidden, "csrf_rejected", "Origin is not allowed."))
 				return
 			}
 		}
 		c.Next()
 	}
+}
+
+// sameOrigin reports whether origin is this server's own origin. A page served
+// by the API itself (EM_SERVE_FRONTEND) sends its own origin, which need not be
+// on the cross-origin allowlist. A browser sets Origin and Host itself, so a
+// cross-site page cannot make them match.
+func sameOrigin(r *http.Request, origin string) bool {
+	return origin == "http://"+r.Host || origin == "https://"+r.Host
 }
 
 func originSet(origins []string) map[string]struct{} {

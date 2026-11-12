@@ -92,6 +92,7 @@ func New(d Deps) (*gin.Engine, *realtime.Hub, error) {
 
 	r.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	r.GET("/readyz", readyz(d.Pool, d.Redis))
+	registerDocs(r)
 
 	v1 := r.Group("/api/v1")
 	v1.Use(middleware.BodyLimit(events.MaxIngestBodyBytes))
