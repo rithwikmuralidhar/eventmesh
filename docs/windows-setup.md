@@ -49,4 +49,20 @@ private-only.
 
 ## 5. pgvector (milestone 11 only)
 
-Not installed: the AI features (milestone 11) are not built, so nothing in the core system needs pgvector.
+Only the **docs Q&A** feature needs pgvector; the explanation and search features and the whole core system do not. The core
+migrations never reference it: the API (when `EM_FEATURE_AI_DOCS=true` and a key is set) and `scripts\index-docs.ps1` run
+`CREATE EXTENSION IF NOT EXISTS vector` and create `doc_chunks` themselves, and the API logs a warning and reports the feature
+unavailable if the extension is missing.
+
+Install (check pgvector's README for current instructions): build from source with the Visual Studio C++ build tools. In an
+"x64 Native Tools Command Prompt for VS", as Administrator, set `PGROOT` to the PostgreSQL folder, then
+`git clone https://github.com/pgvector/pgvector.git`, `nmake /F Makefile.win`, `nmake /F Makefile.win install`, and restart
+the PostgreSQL service. Verify with `CREATE EXTENSION IF NOT EXISTS vector;` in the `eventmesh` database (a superuser may
+need to run it once).
+
+`vector` is not a trusted extension, so the `eventmesh` role cannot create it: a superuser runs `CREATE EXTENSION IF NOT EXISTS
+vector;` once in `template1` (so per-run test databases inherit it) and in `eventmesh`.
+
+Status on the development machine: pgvector v0.8.1 was built (Visual Studio `nmake`), installed with
+`scripts\install-pgvector.ps1` and enabled as above. `EM_TEST_PGVECTOR=1 go test ./tests -run PgVector` passes against the real
+store with a fake embedder. The live Gemini API has not been called. See `docs/ai-evaluation.md`.

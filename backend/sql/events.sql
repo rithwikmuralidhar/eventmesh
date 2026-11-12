@@ -70,6 +70,8 @@ FROM (
         OR (e.created_at, e.id) < (sqlc.narg('cursor_created_at')::timestamptz, sqlc.narg('cursor_id')::uuid)
       )
 ) t
-WHERE sqlc.narg('status')::text IS NULL OR t.status = sqlc.narg('status')::text
+WHERE (sqlc.narg('status')::text IS NULL OR t.status = sqlc.narg('status')::text)
+  AND (sqlc.narg('endpoint_id')::uuid IS NULL OR EXISTS (
+    SELECT 1 FROM deliveries x WHERE x.event_id = t.id AND x.endpoint_id = sqlc.narg('endpoint_id')::uuid))
 ORDER BY t.created_at DESC, t.id DESC
 LIMIT sqlc.arg('page_limit');

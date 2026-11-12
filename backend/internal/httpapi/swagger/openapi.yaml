@@ -12,6 +12,7 @@ tags:
   - name: Auth
   - name: Ingestion
   - name: Events
+  - name: AI
   - name: Deliveries
   - name: Endpoints
   - name: API keys
@@ -224,6 +225,7 @@ paths:
         - { $ref: "#/components/parameters/From" }
         - { $ref: "#/components/parameters/To" }
         - { name: id, in: query, description: Event ID prefix, schema: { type: string } }
+        - { name: endpoint_id, in: query, description: Only events that have a delivery to this endpoint, schema: { type: string, format: uuid } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Page" } } } }
         "400": { $ref: "#/components/responses/Error" }
@@ -272,6 +274,79 @@ paths:
         "200": { description: Replayed }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Error" }
+  /deliveries/{id}/explain:
+    post:
+      tags: [AI]
+      security: [{ session: [] }]
+      summary: Optional AI suggestion for a dead-lettered delivery
+      description: |
+        Milestone 11, off by default. Only for `dead_letter` deliveries (`409 not_explainable` otherwise). Sends the
+        delivery status, endpoint host, and per-attempt status code, error category, trigger and duration; never the
+        payload, secret, signature, headers or full URL. `include_response_excerpt` also sends the last response
+        excerpt after redaction. The answer is at most 4 sentences, labelled AI-generated, and cached for 24 hours.
+        `503 feature_disabled` when the flag is off, `503 ai_not_configured` when no key is set.
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                include_response_excerpt: { type: boolean, default: false }
+      responses:
+        "200": { description: OK }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /ai/docs/ask:
+    post:
+      tags: [AI]
+      security: [{ session: [] }]
+      summary: Ask a question about the EventMesh documentation
+      description: |
+        Milestone 11, off by default. Retrieves the top 5 documentation chunks by cosine similarity and answers only
+        from them. `sources` lists the chunks actually supplied. Below the similarity threshold the answer is
+        "Not found in the docs." and the chat model is not called.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string, maxLength: 1000 }
+      responses:
+        "200": { description: OK }
+        "400": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /ai/search/events:
+    post:
+      tags: [AI]
+      security: [{ session: [] }]
+      summary: Turn a plain-English question into event filters
+      description: |
+        Milestone 11, off by default. Returns validated filters only (event_type, status, endpoint_id, from, to,
+        id_search); it returns no events. The client shows the filters for confirmation and then calls `GET /events`.
+        Output that is not exactly the expected shape, or names an endpoint the user does not own, is `422
+        invalid_search_interpretation`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string, maxLength: 500 }
+      responses:
+        "200": { description: OK }
+        "400": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /endpoints:
     post:
       tags: [Endpoints]
@@ -355,7 +430,7 @@ paths:
     get:
       tags: [Dashboard]
       security: [{ session: [] }]
-      summary: Read-only system retry defaults and limits
+      summary: Read-only system retry defaults and limits, plus which AI features are available
       responses: { "200": { description: OK } }
   /audit-logs:
     get:

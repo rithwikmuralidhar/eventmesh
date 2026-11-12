@@ -187,3 +187,28 @@ export interface Page<T> {
   items: T[]
   next_cursor: string | null
 }
+
+export interface AiSearchFilters {
+  event_type: string | null
+  status: string | null
+  endpoint_id: string | null
+  from: string | null
+  to: string | null
+  id_search: string | null
+}
+
+export interface AiExplanation {
+  explanation: string
+  ai_generated: boolean
+  model: string
+  generated_at: string
+  cached: boolean
+  included_excerpt: boolean
+  disclaimer: string
+}
+
+export interface AiDocsAnswer {
+  answer: string
+  ai_generated: boolean
+  sources: { source_path: string; heading_path: string; line_range: string }[]
+}

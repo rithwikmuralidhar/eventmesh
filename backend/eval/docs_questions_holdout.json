@@ -1,0 +1,12 @@
+[
+  {"question": "How is authorization enforced so one user cannot read another user's data?", "source": "docs/security.md", "heading": "Authorization"},
+  {"question": "How does the rate limiting work and what are the limits?", "source": "docs/security.md", "heading": "Rate limiting"},
+  {"question": "Which database indexes exist and which queries do they serve?", "source": "docs/database.md", "heading": "Indexes and the query each serves"},
+  {"question": "What are the states a delivery can go through during its lifecycle?", "source": "docs/architecture.md", "heading": "Delivery lifecycle"},
+  {"question": "Which background loops run in the worker process?", "source": "docs/architecture.md", "heading": "Background loops (in the worker process, safe to run in several)"},
+  {"question": "How are passwords hashed and what parameters are used?", "source": "docs/security.md", "heading": "Passwords"},
+  {"question": "How do I rotate database credentials using HashiCorp Vault?", "source": null, "heading": null},
+  {"question": "Does EventMesh support GraphQL subscriptions?", "source": null, "heading": null},
+  {"question": "What is the maximum message size supported for Kafka topics?", "source": null, "heading": null},
+  {"question": "How do I deploy the worker to AWS Lambda?", "source": null, "heading": null}
+]

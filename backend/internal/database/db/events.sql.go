@@ -186,9 +186,11 @@ FROM (
         OR (e.created_at, e.id) < ($6::timestamptz, $7::uuid)
       )
 ) t
-WHERE $8::text IS NULL OR t.status = $8::text
+WHERE ($8::text IS NULL OR t.status = $8::text)
+  AND ($9::uuid IS NULL OR EXISTS (
+    SELECT 1 FROM deliveries x WHERE x.event_id = t.id AND x.endpoint_id = $9::uuid))
 ORDER BY t.created_at DESC, t.id DESC
-LIMIT $9
+LIMIT $10
 `
 
 type ListEventsParams struct {
@@ -200,6 +202,7 @@ type ListEventsParams struct {
 	CursorCreatedAt *time.Time
 	CursorID        *uuid.UUID
 	Status          *string
+	EndpointID      *uuid.UUID
 	PageLimit       int32
 }
 
@@ -224,6 +227,7 @@ func (q *Queries) ListEvents(ctx context.Context, arg ListEventsParams) ([]ListE
 		arg.CursorCreatedAt,
 		arg.CursorID,
 		arg.Status,
+		arg.EndpointID,
 		arg.PageLimit,
 	)
 	if err != nil {

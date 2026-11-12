@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError, api } from '../api/client'
+import { AiExplainCard, useAiAvailability } from '../components/ai'
 import { PageHeader } from '../components/Layout'
 import {
   Badge,
@@ -155,6 +156,7 @@ export function DeliveryDetailPage() {
   const { id = '' } = useParams()
   const qc = useQueryClient()
   const q = useQuery({ queryKey: ['delivery', id], queryFn: () => api.getDelivery(id) })
+  const ai = useAiAvailability()
   const [replayError, setReplayError] = useState<string | null>(null)
   const replay = useMutation({
     mutationFn: () => api.replayDelivery(id),
@@ -203,6 +205,7 @@ export function DeliveryDetailPage() {
           </p>
         )}
       </Card>
+      {d.status === 'dead_letter' && ai.explain && <AiExplainCard deliveryId={d.id} />}
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="Details">
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">

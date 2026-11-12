@@ -107,3 +107,25 @@ delivery ID is ever a label value: each distinct value creates a new time series
 
 Quick check: `(Invoke-WebRequest http://127.0.0.1:9091/metrics -UseBasicParsing).Content -split "`n" | Select-String eventmesh_queue_depth`.
 Local Prometheus: a scrape config with `static_configs: [{targets: ['127.0.0.1:9090','127.0.0.1:9091']}]`.
+
+## AI features (milestone 11, optional)
+
+They sit beside the delivery path, never in it: `backend/internal/ai` is imported only by the API router, so workers, the
+queue and the retry code cannot call a model, and a provider outage cannot delay or fail a delivery. Everything goes through
+one `Service` that checks the feature flag and key first (`feature_disabled` / `ai_not_configured`), truncates input, caps
+output, takes a token from a shared limiter, calls the `Provider` interface (Gemini in `gemini.go`, a fake in tests) and
+writes an audit row.
+
+**RAG over the docs.** `scripts\index-docs.ps1` chunks `README.md`, `docs/openapi.yaml` and `docs/*.md` (not the build spec, progress log or evaluation reports) by heading (OpenAPI
+by path and schema), embeds only chunks whose content hash is new, and stores them in pgvector's `doc_chunks`. A question is
+embedded, the 5 nearest chunks by cosine distance are retrieved, and if the best similarity is under the threshold (0.68 by default, chosen from the evaluation) the answer is
+"Not found in the docs." without calling the chat model. Otherwise the chunks go into a prompt that says to answer only from
+them, and the response cites exactly those chunks. The model is told the excerpts are data, but excerpts are still text the
+model reads: a hostile sentence in a doc could influence an answer, which is why the docs are the project's own files.
+
+**Explanations and search.** The explanation of a dead-lettered delivery is a second, labelled block under the
+deterministic one. Search asks for a six-field JSON object, validates it strictly, and hands back filters for the user to
+confirm; the events page then runs them through the same list function as any manual filter.
+
+**What the numbers do and do not show.** `docs/ai-evaluation.md` reports retrieval recall and latency only after
+`scripts\eval-docs.ps1` has run against a real index; until then it says it was not run. It never measures answer quality.

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { ApiError, api } from '../api/client'
+import { AskDocsCard } from '../components/ai'
 import { PageHeader } from '../components/Layout'
 import {
   Badge,
@@ -255,6 +256,7 @@ export function SettingsPage() {
           </>
         )}
       </Card>
+      {s?.ai.docs && <AskDocsCard />}
       <Card title="Account">
         <p className="text-sm">
           <span className="text-muted">Signed in as </span>

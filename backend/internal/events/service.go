@@ -259,3 +259,36 @@ func (s *Service) existing(ctx context.Context, userID uuid.UUID, key string, re
 		CreatedAt: event.CreatedAt, Replayed: true,
 	}, true, nil
 }
+
+// ListResult is one page of the event list.
+type ListResult struct {
+	Items      []Summary
+	NextCursor *string
+}
+
+// List runs the event list query. It is the single implementation behind
+// GET /events and the natural-language search, so both apply identical
+// ownership and filter rules. limit is the page size; params.PageLimit is
+// set here (one extra row detects a next page).
+func (s *Service) List(ctx context.Context, params db.ListEventsParams, limit int32) (ListResult, error) {
+	params.PageLimit = limit + 1
+	rows, err := s.queries.ListEvents(ctx, params)
+	if err != nil {
+		return ListResult{}, fmt.Errorf("list events: %w", err)
+	}
+	var next *string
+	if len(rows) > int(limit) {
+		rows = rows[:limit]
+		last := rows[len(rows)-1]
+		cur := httpx.EncodeCursor(last.CreatedAt, last.ID)
+		next = &cur
+	}
+	items := make([]Summary, 0, len(rows))
+	for _, r := range rows {
+		items = append(items, Summary{
+			ID: r.ID, EventType: r.EventType, Status: r.Status, DeliveryCount: r.DeliveryCount,
+			IdempotencyKey: r.IdempotencyKey, CreatedAt: r.CreatedAt,
+		})
+	}
+	return ListResult{Items: items, NextCursor: next}, nil
+}

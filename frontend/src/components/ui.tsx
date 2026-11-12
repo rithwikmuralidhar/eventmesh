@@ -85,7 +85,7 @@ export function Card({
   className?: string
 }) {
   return (
-    <section className={`rounded-card border border-border bg-surface ${className}`}>
+    <section className={`min-w-0 rounded-card border border-border bg-surface ${className}`}>
       {(title || actions) && (
         <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
           {title && <h2 className="text-sm font-semibold">{title}</h2>}

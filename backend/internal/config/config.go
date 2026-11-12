@@ -74,6 +74,9 @@ type Config struct {
 	ReceiverBaseURL string
 	APIBaseURL      string
 	DemoEventCount  int
+
+	// AI is the optional milestone 11 configuration; off by default.
+	AI AI
 }
 
 // Load reads the configuration through getenv (os.Getenv in production, a map
@@ -129,6 +132,7 @@ func Load(getenv func(string) string) (Config, error) {
 		DemoEventCount:  r.integer("DEMO_EVENT_COUNT", 40, 0, 10_000),
 	}
 
+	cfg.AI = loadAI(r)
 	cfg.CookieSecure = cfg.Env == EnvProduction // development runs over plain HTTP
 	keyB64 := r.str("SECRET_ENCRYPTION_KEY", DevSecretEncryptionKey)
 	key, err := base64.StdEncoding.DecodeString(keyB64)
@@ -258,4 +262,17 @@ func (r *reader) list(key, def string) []string {
 		}
 	}
 	return out
+}
+
+func (r *reader) float(key string, def, lo, hi float64) float64 {
+	raw := strings.TrimSpace(r.getenv(key))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v < lo || v > hi {
+		r.fail(fmt.Sprintf("%s must be a number between %g and %g, got %q", key, lo, hi, raw))
+		return def
+	}
+	return v
 }

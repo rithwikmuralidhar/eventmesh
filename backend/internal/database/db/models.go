@@ -52,6 +52,15 @@ type Delivery struct {
 	UpdatedAt          time.Time
 }
 
+type DeliveryAiExplanation struct {
+	DeliveryID     uuid.UUID
+	UserID         uuid.UUID
+	Explanation    string
+	Model          string
+	IncludeExcerpt bool
+	GeneratedAt    time.Time
+}
+
 type DeliveryAttempt struct {
 	ID                  uuid.UUID
 	DeliveryID          uuid.UUID

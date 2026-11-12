@@ -134,7 +134,7 @@ func TestDialContextEnforcesPolicyAtConnectionTime(t *testing.T) {
 	}
 
 	t.Run("blocked", func(t *testing.T) {
-		resp, err := newClient(NewPolicy(nil, nil)).Get(srv.URL)
+		resp, err := get(newClient(NewPolicy(nil, nil)), srv.URL)
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
@@ -143,7 +143,7 @@ func TestDialContextEnforcesPolicyAtConnectionTime(t *testing.T) {
 	})
 
 	t.Run("allowlisted", func(t *testing.T) {
-		resp, err := newClient(NewPolicy([]string{"127.0.0.1"}, nil)).Get(srv.URL)
+		resp, err := get(newClient(NewPolicy([]string{"127.0.0.1"}, nil)), srv.URL)
 		require.NoError(t, err)
 		defer func() { _ = resp.Body.Close() }()
 		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
@@ -154,11 +154,19 @@ func TestDialContextEnforcesPolicyAtConnectionTime(t *testing.T) {
 		// only the Control hook, which sees the resolved IP, can stop it.
 		_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
 		require.NoError(t, err)
-		resp, err := newClient(NewPolicy(nil, nil)).Get("http://localhost:" + port)
+		resp, err := get(newClient(NewPolicy(nil, nil)), "http://localhost:"+port)
 		if resp != nil {
 			_ = resp.Body.Close()
 		}
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrBlocked)
 	})
+}
+
+func get(c *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.Do(req)
 }

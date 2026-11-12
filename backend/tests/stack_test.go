@@ -183,7 +183,7 @@ func (c *client) do(method, path string, body any, headers ...string) resp {
 		require.NoError(c.t, err)
 		rd = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, c.base+path, rd)
+	req, err := http.NewRequestWithContext(context.Background(), method, c.base+path, rd)
 	require.NoError(c.t, err)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Requested-With", "test")

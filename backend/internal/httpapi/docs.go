@@ -8,7 +8,7 @@ import (
 )
 
 // swaggerFS holds the Swagger UI assets and a copy of docs/openapi.yaml.
-// go:embed cannot reach outside the module, so the spec is copied here; a unit
+// The embed directive cannot reach outside the module, so the spec is copied here; a unit
 // test fails if the copy drifts from docs/openapi.yaml.
 //
 //go:embed swagger

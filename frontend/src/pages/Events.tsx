@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { JsonView } from '../components/JsonView'
+import { AiSearchBar, useAiAvailability } from '../components/ai'
 import { PageHeader } from '../components/Layout'
 import {
   Button,
@@ -34,7 +35,12 @@ export function useUrlFilters(keys: string[]) {
     else next.delete(key)
     setParams(next, { replace: true })
   }
-  return { filters, set, clear: () => setParams({}, { replace: true }) }
+  return {
+    filters,
+    set,
+    setAll: (next: URLSearchParams) => setParams(next, { replace: true }),
+    clear: () => setParams({}, { replace: true }),
+  }
 }
 
 /** An <input type="date"> value (YYYY-MM-DD) as an ISO timestamp at the start or end of that local day. */
@@ -45,7 +51,15 @@ export function dayBoundary(date: string | undefined, end: boolean): string | un
 }
 
 export function EventsPage() {
-  const { filters, set, clear } = useUrlFilters(['event_type', 'status', 'from', 'to', 'id'])
+  const { filters, set, setAll, clear } = useUrlFilters([
+    'event_type',
+    'status',
+    'from',
+    'to',
+    'id',
+    'endpoint_id',
+  ])
+  const ai = useAiAvailability()
   const request = {
     ...filters,
     from: dayBoundary(filters.from, false) ?? '',
@@ -56,6 +70,20 @@ export function EventsPage() {
   return (
     <>
       <PageHeader title="Events" />
+      {ai.search && (
+        <AiSearchBar
+          onApply={(f) => {
+            const next = new URLSearchParams()
+            if (f.event_type) next.set('event_type', f.event_type)
+            if (f.status) next.set('status', f.status)
+            if (f.endpoint_id) next.set('endpoint_id', f.endpoint_id)
+            if (f.id_search) next.set('id', f.id_search)
+            if (f.from) next.set('from', f.from.slice(0, 10))
+            if (f.to) next.set('to', f.to.slice(0, 10))
+            setAll(next)
+          }}
+        />
+      )}
       <Card>
         <form
           className="grid gap-3 md:grid-cols-5"
@@ -101,6 +129,9 @@ export function EventsPage() {
         </form>
         {Object.keys(filters).length > 0 && (
           <div className="pt-3">
+            {filters.endpoint_id && (
+              <p className="pb-2 text-sm text-muted">Filtered to endpoint {shortId(filters.endpoint_id)}.</p>
+            )}
             <Button variant="ghost" onClick={clear}>
               Clear filters
             </Button>
@@ -147,6 +178,9 @@ export function EventsPage() {
         )}
         {list.hasNextPage && (
           <div className="pt-3">
+            {filters.endpoint_id && (
+              <p className="pb-2 text-sm text-muted">Filtered to endpoint {shortId(filters.endpoint_id)}.</p>
+            )}
             <Button onClick={() => void list.fetchNextPage()} disabled={list.isFetchingNextPage}>
               Load more
             </Button>

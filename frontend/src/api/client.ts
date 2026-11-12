@@ -9,6 +9,9 @@ import type {
   EventSummary,
   Page,
   Settings,
+  AiDocsAnswer,
+  AiExplanation,
+  AiSearchFilters,
   Stats,
   StatsRange,
   User,
@@ -126,6 +129,14 @@ export const api = {
   listApiKeys: () => request<{ items: ApiKey[] }>('GET', '/api-keys'),
   createApiKey: (name: string) => request<{ api_key: ApiKey; key: string }>('POST', '/api-keys', { name }),
   revokeApiKey: (id: string) => request<void>('DELETE', `/api-keys/${id}`),
+
+  aiExplain: (id: string, include_response_excerpt: boolean) =>
+    request<{ explanation: AiExplanation }>('POST', `/deliveries/${id}/explain`, {
+      include_response_excerpt,
+    }),
+  aiSearchEvents: (query: string) =>
+    request<{ filters: AiSearchFilters }>('POST', '/ai/search/events', { query }),
+  aiAskDocs: (question: string) => request<AiDocsAnswer>('POST', '/ai/docs/ask', { question }),
 
   listAudit: (f: ListFilters) => request<Page<AuditEntry>>('GET', '/audit-logs', undefined, f),
 }

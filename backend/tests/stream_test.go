@@ -2,6 +2,7 @@ package tests
 
 import (
 	"bufio"
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ import (
 // the "data:" payload lines it receives.
 func openStream(t *testing.T, c *client) <-chan string {
 	t.Helper()
-	req, err := http.NewRequest("GET", c.base+"/stream", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", c.base+"/stream", nil)
 	require.NoError(t, err)
 	res, err := (&http.Client{Jar: c.http.Jar}).Do(req)
 	require.NoError(t, err)

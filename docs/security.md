@@ -121,4 +121,42 @@ delivery and a failure and asserts their absence.
 
 ## AI features
 
-Not built (milestone 11 is optional). No data is sent to any AI provider.
+Milestone 11, optional, **off by default**.
+
+Nothing is sent to any provider unless all three hold: `EM_AI_PROVIDER=gemini`, `EM_AI_API_KEY` is set, and the feature's
+own flag (`EM_FEATURE_AI_DOCS`, `EM_FEATURE_AI_EXPLAIN`, `EM_FEATURE_AI_SEARCH`) is `true`. With the key unset no client
+object is even created; every AI endpoint answers `503 ai_not_configured` (flag on) or `503 feature_disabled` (flag off).
+The key is read only in `internal/config`, is redacted by `AI.String()`, and is never logged, returned by an endpoint or
+sent to the browser (`GET /settings` reports only booleans).
+
+| Feature | What is sent to Google | What is never sent |
+| --- | --- | --- |
+| Docs Q&A | The text of `README.md`, `docs/openapi.yaml` and `docs/*.md` except `PROMPT.md`, `PROGRESS.md` and `ai-evaluation*.md` (at indexing, as embedding input); each question (embedding input); the question plus the top 5 retrieved chunks (chat prompt) | Anything from the database |
+| Delivery explanation | Delivery status, endpoint **host** (no scheme, path, query or credentials), and for up to 10 attempts: number, trigger, status code, error category, duration. With "include response excerpt" ticked: the last response excerpt after redaction, cut to 500 characters | Endpoint secret, signatures, headers, event payload, endpoint path, error messages |
+| Event search | The question text and today's date | Events, endpoints, endpoint names or IDs, any user data |
+
+**Redaction** (`ai.RedactExcerpt`, tested in `internal/ai/redact_test.go`) removes JWTs, `Bearer`/`Basic`/`Token` values,
+provider key patterns (`sk_`, `pk_`, `rk_`, `whsec_`, `ghp_`, `AKIA`, `AIza`, `xox`), values of
+`password`/`secret`/`token`/`api_key`/`signature`/`authorization`/`session`/`cookie` in `key=value` and JSON form, email
+addresses, Luhn-valid card numbers and any opaque string of 32+ characters. It is a pattern filter, not a guarantee: a
+secret in a shape no rule knows would pass through, which is why the excerpt is opt-in and off by default.
+
+**Model output is untrusted.** It is never executed, never used as SQL or a URL, and never triggers a write (no replay, no
+delete). Search output must be exactly one JSON object of six known fields; unknown fields, bad enum values, bad dates or
+an endpoint ID the user does not own give `422`, never a partial query. The user ID comes from the session, so no output
+can widen access. Docs answers cite only the chunks that were retrieved and supplied to the model.
+
+**Limits.** Input is cut to `EM_AI_MAX_INPUT_CHARS`, output is capped at `EM_AI_MAX_OUTPUT_TOKENS`, and all calls share one
+token bucket (`EM_AI_REQUESTS_PER_MINUTE`, Redis key `ai`).
+
+**Audit.** Every model call writes an `ai.request` audit row: user, feature, model name, token counts when the SDK reports
+them, and outcome. The prompt, question and answer are not logged.
+
+**Data terms.** Free-tier Gemini API usage may be used by Google to improve its products, so do not use a free-tier key with
+data you would not share; paid-tier usage is governed by the paid terms. Check Google's current Gemini API terms before
+enabling any feature on real data; this document does not restate them. All three features produce suggestions; the UI
+labels them AI-generated and they can be wrong.
+
+**Disabling.** Set the feature's flag to `false` (or unset `EM_AI_API_KEY` or `EM_AI_PROVIDER`) and restart the API. The UI
+hides the controls when `GET /settings` reports a feature as unavailable. Indexed chunks stay in `doc_chunks`; drop that
+table to remove them.

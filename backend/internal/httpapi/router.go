@@ -14,11 +14,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"eventmesh/internal/ai"
 	"eventmesh/internal/apikeys"
 	"eventmesh/internal/audit"
 	"eventmesh/internal/auth"
 	"eventmesh/internal/clock"
 	"eventmesh/internal/config"
+	"eventmesh/internal/database/db"
 	"eventmesh/internal/deliveries"
 	"eventmesh/internal/endpoints"
 	"eventmesh/internal/events"
@@ -43,6 +45,10 @@ type Deps struct {
 	// replace them (for example with an enqueuer that always fails).
 	Queue     events.Enqueuer
 	Publisher realtime.Publisher
+	// AIProvider and AIDocs replace the Gemini client and the pgvector store
+	// (tests inject fakes). Both are nil in production.
+	AIProvider ai.Provider
+	AIDocs     ai.DocStore
 }
 
 // New builds the Gin engine and the live-update hub. The caller runs the hub.
@@ -75,6 +81,11 @@ func New(d Deps) (*gin.Engine, *realtime.Hub, error) {
 	eventsH := events.NewHandler(eventsSvc, d.Pool)
 	deliveriesH := deliveries.NewHandler(d.Pool, d.Queue, d.Publisher, cfg.MaxRetries)
 	auditH := audit.NewHandler(d.Pool)
+	aiSvc, err := buildAI(context.Background(), d, limiter)
+	if err != nil {
+		return nil, nil, err
+	}
+	aiH := ai.NewHandler(aiSvc, endpointOwner(db.New(d.Pool)))
 
 	r := gin.New()
 	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
@@ -117,6 +128,9 @@ func New(d Deps) (*gin.Engine, *realtime.Hub, error) {
 	s.GET("/deliveries", deliveriesH.List)
 	s.GET("/deliveries/:id", deliveriesH.Get)
 	s.POST("/deliveries/:id/replay", deliveriesH.Replay)
+	s.POST("/deliveries/:id/explain", aiH.Explain)
+	s.POST("/ai/docs/ask", aiH.AskDocs)
+	s.POST("/ai/search/events", aiH.SearchEvents)
 
 	s.POST("/endpoints", endpointsH.Create)
 	s.GET("/endpoints", endpointsH.List)
@@ -130,7 +144,7 @@ func New(d Deps) (*gin.Engine, *realtime.Hub, error) {
 	s.DELETE("/api-keys/:id", keysH.Revoke)
 
 	s.GET("/dashboard/stats", deliveriesH.Stats)
-	s.GET("/settings", settings(cfg))
+	s.GET("/settings", settings(cfg, aiSvc))
 	s.GET("/audit-logs", auditH.List)
 	s.GET("/stream", hub.Stream)
 
@@ -156,8 +170,9 @@ func readyz(pool *pgxpool.Pool, rdb redis.UniversalClient) gin.HandlerFunc {
 }
 
 // settings reports the read-only system configuration the dashboard shows.
-func settings(cfg config.Config) gin.HandlerFunc {
+func settings(cfg config.Config, aiSvc *ai.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		avail := aiSvc.Available()
 		initial, maxDelay := cfg.RetryMillis()
 		c.JSON(http.StatusOK, gin.H{
 			"retry": gin.H{
@@ -168,7 +183,7 @@ func settings(cfg config.Config) gin.HandlerFunc {
 				"max_payload_bytes": events.MaxPayloadBytes, "default_endpoint_rate_per_second": 10,
 				"ingest_rate_per_second": cfg.IngestRateLimit, "api_rate_per_second": cfg.APIRateLimit,
 			},
-			"ai": gin.H{"docs": false, "explain": false, "search": false},
+			"ai": gin.H{"docs": avail[ai.FeatureDocs], "explain": avail[ai.FeatureExplain], "search": avail[ai.FeatureSearch]},
 		})
 	}
 }

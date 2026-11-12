@@ -98,6 +98,13 @@ Every setting is an `EM_*` environment variable, read once at startup into one t
 `EM_ENV=production` the API refuses to start with the public development encryption key, a non-empty
 `EM_SSRF_ALLOWED_HOSTS`, or the default database password.
 
+## Optional AI features (off by default)
+
+Docs Q&A, dead-letter explanations and natural-language event search use the Gemini API. They need
+`EM_AI_PROVIDER=gemini`, `EM_AI_API_KEY` and a per-feature `EM_FEATURE_AI_*` flag; with any of those missing the endpoints
+answer `503` and the UI hides the controls. What each feature sends is in [docs/security.md](docs/security.md); setup
+(including pgvector for docs Q&A) is in [docs/windows-setup.md](docs/windows-setup.md).
+
 ## Known limitations
 
 No ordering guarantee between deliveries. Events, attempts and idempotency keys are kept forever (no retention job).

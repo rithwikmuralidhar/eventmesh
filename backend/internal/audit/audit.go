@@ -31,6 +31,8 @@ const (
 	ActionEndpointDeleted   = "endpoint.deleted"
 	ActionEndpointSecretRot = "endpoint.secret_rotated"
 	ActionDeliveryReplayed  = "delivery.replayed"
+	ActionAIRequest         = "ai.request"
+	ResourceAI              = "ai"
 	ResourceUser            = "user"
 	ResourceSession         = "session"
 	ResourceAPIKey          = "api_key"

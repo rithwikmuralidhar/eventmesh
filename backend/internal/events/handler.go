@@ -89,30 +89,16 @@ func (h *Handler) List(c *gin.Context) {
 		httpx.WriteError(c, err)
 		return
 	}
-	rows, err := h.queries.ListEvents(c.Request.Context(), params)
+	res, err := h.service.List(c.Request.Context(), params, limit)
 	if err != nil {
-		httpx.WriteError(c, fmt.Errorf("list events: %w", err))
+		httpx.WriteError(c, err)
 		return
 	}
-	var next *string
-	if len(rows) > int(limit) {
-		rows = rows[:limit]
-		last := rows[len(rows)-1]
-		cur := httpx.EncodeCursor(last.CreatedAt, last.ID)
-		next = &cur
-	}
-	items := make([]Summary, 0, len(rows))
-	for _, r := range rows {
-		items = append(items, Summary{
-			ID: r.ID, EventType: r.EventType, Status: r.Status, DeliveryCount: r.DeliveryCount,
-			IdempotencyKey: r.IdempotencyKey, CreatedAt: r.CreatedAt,
-		})
-	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "next_cursor": next})
+	c.JSON(http.StatusOK, gin.H{"items": res.Items, "next_cursor": res.NextCursor})
 }
 
 func parseListParams(c *gin.Context) (db.ListEventsParams, int32, error) {
-	if err := httpx.AllowQuery(c, "limit", "cursor", "event_type", "status", "from", "to", "id"); err != nil {
+	if err := httpx.AllowQuery(c, "limit", "cursor", "event_type", "status", "from", "to", "id", "endpoint_id"); err != nil {
 		return db.ListEventsParams{}, 0, err
 	}
 	page, err := httpx.ParsePage(c)
@@ -142,6 +128,13 @@ func parseListParams(c *gin.Context) (db.ListEventsParams, int32, error) {
 			return db.ListEventsParams{}, 0, httpx.BadRequest("id must be a full or partial event ID.")
 		}
 		params.IDPrefix = &v
+	}
+	if raw := c.Query("endpoint_id"); raw != "" {
+		eid, perr := uuid.Parse(raw)
+		if perr != nil {
+			return db.ListEventsParams{}, 0, httpx.BadRequest("endpoint_id must be a UUID.")
+		}
+		params.EndpointID = &eid
 	}
 	if params.CreatedFrom, err = httpx.QueryTime(c, "from"); err != nil {
 		return db.ListEventsParams{}, 0, err
