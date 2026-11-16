@@ -38,7 +38,7 @@ Added after milestone 11, each with its evidence:
 | Isolation | "Transactions and isolation" in `docs/database.md`; `tests/isolation_test.go` (4 tests: 32-way claim race, blocked second claim, rollback hand-over, fencing) | `go test -race` |
 | Cache | `internal/cache` (TTL, per-user key, singleflight, fail-open), `GET /dashboard/stats` reads through it, `X-Cache` header, `EM_STATS_CACHE_TTL` | `tests/cache_test.go` (5 tests); timings in `docs/performance.md` |
 | Tracing | OpenTelemetry spans in the API and worker, `events.trace_context` (migration 000003), trace ID in logs, `EM_TRACE_*` | `tests/tracing_test.go` (3 tests, in-memory exporter); `stdout` exporter run once by hand |
-| Docker | `Dockerfile`, `.dockerignore`, `docker-compose.app.yml`, `scripts/docker-smoke.sh`, CI job `docker` | **Not run locally** (Docker Desktop's engine returned HTTP 500 on this machine). Verified only if the CI job has run: see below |
+| Docker | `Dockerfile`, `.dockerignore`, `docker-compose.app.yml`, `scripts/docker-smoke.sh`, CI job `docker` | CI run 43897123868 (commit 553eff3, 2026-11-16): image built, stack started, `/readyz` ok, UI served, one event delivered through the containers, image runs as non-root. Never run on the development machine (its Docker engine returned HTTP 500) |
 | Bottleneck | `backend/bench/drain.sh`, `EM_DISPATCHER_COUNT`, "Finding the delivery ceiling" in `docs/performance.md` | 30 runs (10 configurations x 3) plus 3 CPU-sampled runs |
 | Interview document | `docs/interview-prep.md` | Facts checked against the code and the measurements above |
 
@@ -47,8 +47,7 @@ Local verification after all of it: gofmt, `go vet`, golangci-lint (0 issues), `
 
 Not verified or not done in this pass:
 
-- The Docker image and compose stack have never been built or run anywhere unless the `docker` CI job has passed on GitHub.
-  Image tags (`golang:1.26-alpine`, `node:lts-alpine`, `alpine:3`, `pgvector/pgvector:pg17`) were written from memory.
+- The Docker stack was built and smoke-tested only in CI (run 43897123868, all four jobs passed: backend, frontend, e2e, docker), never locally. The `seed` profile was not run.
 - No OTLP collector was run; the `otlp` exporter path is untested. The outgoing webhook does not carry `traceparent`.
 - `scripts\explain-plans.ps1` wraps steps that were run by hand; the script itself was not run.
 - The remaining delivery ceiling (about 6,200/s) and the half-speed first repetition are reported, not explained.
