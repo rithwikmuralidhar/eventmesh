@@ -18,6 +18,7 @@ import (
 	"eventmesh/internal/apikeys"
 	"eventmesh/internal/audit"
 	"eventmesh/internal/auth"
+	"eventmesh/internal/cache"
 	"eventmesh/internal/clock"
 	"eventmesh/internal/config"
 	"eventmesh/internal/database/db"
@@ -79,7 +80,8 @@ func New(d Deps) (*gin.Engine, *realtime.Hub, error) {
 	endpointsH := endpoints.NewHandler(endpoints.NewService(d.Pool, cipher, policy, d.Publisher))
 	eventsSvc := events.NewService(d.Pool, d.Queue, d.Publisher, d.Metrics)
 	eventsH := events.NewHandler(eventsSvc, d.Pool)
-	deliveriesH := deliveries.NewHandler(d.Pool, d.Queue, d.Publisher, cfg.MaxRetries)
+	deliveriesH := deliveries.NewHandler(d.Pool, d.Queue, d.Publisher, cfg.MaxRetries).
+		WithStatsCache(cache.New(d.Redis, cfg.RedisKeyPrefix, cfg.StatsCacheTTL))
 	auditH := audit.NewHandler(d.Pool)
 	aiSvc, err := buildAI(context.Background(), d, limiter)
 	if err != nil {
@@ -92,6 +94,7 @@ func New(d Deps) (*gin.Engine, *realtime.Hub, error) {
 		return nil, nil, err
 	}
 	r.Use(
+		middleware.Tracing(),
 		middleware.RequestContext(d.Logger, d.Metrics.ObserveHTTP),
 		middleware.Recover(),
 		middleware.CORS(cfg.CORSAllowedOrigins),

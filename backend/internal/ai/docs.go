@@ -262,7 +262,7 @@ func (m *MemStore) Search(_ context.Context, q []float32, k int) ([]ScoredChunk,
 // the measurement they report.
 func excludedDoc(base string) bool {
 	switch base {
-	case "PROMPT.md", "PROGRESS.md":
+	case "PROMPT.md", "PROGRESS.md", "interview-prep.md":
 		return true
 	}
 	return strings.HasPrefix(base, "ai-evaluation")

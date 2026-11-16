@@ -1,6 +1,8 @@
 package deliveries
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -76,27 +78,40 @@ func (h *Handler) Stats(c *gin.Context) {
 		httpx.WriteError(c, httpx.BadRequest("range must be one of 24h, 7d, 30d."))
 		return
 	}
-	ctx := c.Request.Context()
 	userID := httpx.UserID(c)
 
 	// The window starts at a bucket boundary so the first bucket is whole.
 	now := time.Now().UTC()
 	since := now.Truncate(rng.step).Add(-time.Duration(rng.buckets-1) * rng.step)
 
+	// The key carries the user (so one tenant can never be served another's
+	// numbers), the range, and the window start (so an entry cannot outlive
+	// its hour or day bucket).
+	key := fmt.Sprintf("stats:%s:%s:%d", userID, rangeName, since.Unix())
+	body, outcome, err := h.statsCache.Fetch(c.Request.Context(), key, func(ctx context.Context) ([]byte, error) {
+		return h.computeStats(ctx, userID, rangeName, rng, since)
+	})
+	if err != nil {
+		httpx.WriteError(c, err)
+		return
+	}
+	c.Header("X-Cache", string(outcome))
+	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
+}
+
+// computeStats runs the three aggregate queries and renders the response.
+func (h *Handler) computeStats(ctx context.Context, userID uuid.UUID, rangeName string, rng statsRange, since time.Time) ([]byte, error) {
 	totalsRow, err := h.queries.StatsTotals(ctx, db.StatsTotalsParams{UserID: userID, Since: since})
 	if err != nil {
-		httpx.WriteError(c, fmt.Errorf("stats totals: %w", err))
-		return
+		return nil, fmt.Errorf("stats totals: %w", err)
 	}
 	seriesRows, err := h.queries.StatsTimeSeries(ctx, db.StatsTimeSeriesParams{BucketUnit: rng.unit, UserID: userID, Since: since})
 	if err != nil {
-		httpx.WriteError(c, fmt.Errorf("stats series: %w", err))
-		return
+		return nil, fmt.Errorf("stats series: %w", err)
 	}
 	failureRows, err := h.queries.RecentFailures(ctx, db.RecentFailuresParams{UserID: userID, Since: since, RowLimit: recentFailureLimit})
 	if err != nil {
-		httpx.WriteError(c, fmt.Errorf("recent failures: %w", err))
-		return
+		return nil, fmt.Errorf("recent failures: %w", err)
 	}
 
 	totals := Totals{
@@ -118,7 +133,7 @@ func (h *Handler) Stats(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	return json.Marshal(gin.H{
 		"range":           rangeName,
 		"since":           since,
 		"totals":          totals,

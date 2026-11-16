@@ -98,6 +98,27 @@ Every setting is an `EM_*` environment variable, read once at startup into one t
 `EM_ENV=production` the API refuses to start with the public development encryption key, a non-empty
 `EM_SSRF_ALLOWED_HOSTS`, or the default database password.
 
+## Docker (optional)
+
+The native scripts above are the supported development path. To run the whole stack in containers instead:
+
+```
+docker compose -f docker-compose.app.yml up --build -d
+```
+
+That starts PostgreSQL (with pgvector), Redis, a one-shot migration, the API with the built UI on
+<http://127.0.0.1:8090>, a worker and the demo receiver. Register an account in the UI, or load the demo data with
+`docker compose -f docker-compose.app.yml --profile seed run --rm seed`. Stop and delete the data with
+`docker compose -f docker-compose.app.yml down -v`. Development settings only (default passwords, public dev key).
+`docker-compose.yml` is separate and only starts PostgreSQL and Redis for the native workflow.
+
+## Observability
+
+Structured JSON logs with a request ID (and a trace ID when tracing is on), Prometheus metrics on `:9090` (API) and
+`:9091` (worker), and OpenTelemetry traces: set `EM_TRACE_EXPORTER=stdout` to print spans, or `otlp` to send them to
+a collector at `EM_TRACE_OTLP_ENDPOINT`. One event is one trace across the API request, the queue and every delivery
+attempt. Details: [docs/architecture.md](docs/architecture.md).
+
 ## Optional AI features (off by default)
 
 Docs Q&A, dead-letter explanations and natural-language event search use the Gemini API. They need

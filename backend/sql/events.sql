@@ -3,8 +3,8 @@
 -- instead of an error that would abort the transaction. A concurrent insert
 -- of the same key blocks here until the first transaction finishes, so the
 -- loser can then read the winner's committed row.
-INSERT INTO events (id, user_id, event_type, payload, idempotency_key, request_hash)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO events (id, user_id, event_type, payload, idempotency_key, request_hash, trace_context)
+VALUES ($1, $2, $3, $4, $5, $6, sqlc.narg('trace_context'))
 ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 RETURNING id, created_at;
 

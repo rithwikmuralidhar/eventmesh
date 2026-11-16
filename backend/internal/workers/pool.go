@@ -35,6 +35,10 @@ type Config struct {
 	// ProcessID identifies this worker process in locked_by and in logs.
 	ProcessID   string
 	WorkerCount int
+	// Dispatchers is how many goroutines claim jobs from Redis and hand them to
+	// idle workers. One is enough until the claim round trip itself becomes
+	// the limit; see docs/performance.md. Zero means one.
+	Dispatchers int
 	// Lease is how long a claimed delivery is protected from other workers.
 	// It must be comfortably longer than the delivery timeout: if a lease
 	// could expire while its request is in flight, a second worker would
@@ -127,14 +131,18 @@ func (p *Pool) Run(ctx context.Context) error {
 
 	// The dispatcher and the maintenance loops stop as soon as ctx is cancelled.
 	loops, loopCtx := errgroup.WithContext(ctx)
-	loops.Go(func() error { return p.dispatch(loopCtx, jobs, free) })
+	// Several dispatchers are safe: each takes a worker token before it claims,
+	// so together they can never claim more jobs than there are idle workers.
+	for i := 0; i < max(1, p.cfg.Dispatchers); i++ {
+		loops.Go(func() error { return p.dispatch(loopCtx, jobs, free) })
+	}
 	loops.Go(func() error { return p.every(loopCtx, "scheduler", p.cfg.SchedulerInterval, p.promoteDue) })
 	loops.Go(func() error { return p.every(loopCtx, "reaper", p.cfg.ReaperInterval, p.reap) })
 	loops.Go(func() error { return p.every(loopCtx, "reconciler", p.cfg.ReconcilerInterval, p.reconcile) })
 	loops.Go(func() error { return p.every(loopCtx, "queue-depth", queueDepthInterval, p.reportDepths) })
 	err := loops.Wait()
 
-	// Only the dispatcher sends on jobs, and it has returned, so closing is safe.
+	// Only dispatchers send on jobs, and they have all returned, so closing is safe.
 	close(jobs)
 	p.drain(&workers, cancelWork)
 	return err
@@ -159,7 +167,7 @@ func (p *Pool) drain(workers *sync.WaitGroup, cancelWork context.CancelFunc) {
 	}
 }
 
-// dispatch is the single goroutine that claims jobs from Redis.
+// dispatch claims jobs from Redis for idle workers. Config.Dispatchers of these run.
 func (p *Pool) dispatch(ctx context.Context, jobs chan<- string, free chan struct{}) error {
 	for {
 		// Wait for an idle worker before claiming anything.

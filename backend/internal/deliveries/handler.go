@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"eventmesh/internal/audit"
+	"eventmesh/internal/cache"
 	"eventmesh/internal/database"
 	"eventmesh/internal/database/db"
 	"eventmesh/internal/httpx"
@@ -34,6 +35,8 @@ type Handler struct {
 	// defaultMaxRetries is the system default, used to report how many
 	// attempts a delivery is allowed when its endpoint has no override.
 	defaultMaxRetries int
+	// statsCache serves dashboard statistics; nil means "always compute".
+	statsCache *cache.Cache
 }
 
 // NewHandler returns the deliveries handler.
@@ -357,4 +360,10 @@ func (h *Handler) replayRefusal(ctx context.Context, q *db.Queries, userID, id u
 	default:
 		return httpx.Conflict("endpoint_unavailable", "The endpoint for this delivery is disabled. Enable it, then replay.")
 	}
+}
+
+// WithStatsCache makes GET /dashboard/stats read through c. It returns h.
+func (h *Handler) WithStatsCache(c *cache.Cache) *Handler {
+	h.statsCache = c
+	return h
 }

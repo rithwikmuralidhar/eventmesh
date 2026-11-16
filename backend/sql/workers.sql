@@ -22,7 +22,7 @@ WITH claimed AS (
     RETURNING id, event_id, endpoint_id, user_id, attempt_count, cycle_attempt_count, replay_count
 )
 SELECT c.id, c.event_id, c.endpoint_id, c.user_id, c.attempt_count, c.cycle_attempt_count, c.replay_count,
-       e.event_type, e.payload, e.created_at AS event_created_at,
+       e.event_type, e.payload, e.created_at AS event_created_at, e.trace_context,
        ep.url, ep.secret_ciphertext, ep.enabled, ep.deleted_at, ep.rate_limit_per_second,
        ep.max_retries, ep.initial_retry_delay_ms, ep.max_retry_delay_ms
 FROM claimed c

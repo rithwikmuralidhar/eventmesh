@@ -108,6 +108,37 @@ delivery ID is ever a label value: each distinct value creates a new time series
 Quick check: `(Invoke-WebRequest http://127.0.0.1:9091/metrics -UseBasicParsing).Content -split "`n" | Select-String eventmesh_queue_depth`.
 Local Prometheus: a scrape config with `static_configs: [{targets: ['127.0.0.1:9090','127.0.0.1:9091']}]`.
 
+**Traces (OpenTelemetry, off by default).** Logs say what happened in one process and metrics say how often; a trace shows
+where the time went for one event across processes. Spans, in the order they occur:
+
+```
+POST /api/v1/events            API   server span; continues a client's `traceparent` if one was sent
+└─ events.ingest               API   attributes: event ID, event type, result, delivery count
+   ├─ db.ingest_tx             API   event + deliveries, one transaction
+   ├─ queue.enqueue            API   after commit
+   └─ delivery.process         worker, one per attempt; attributes: delivery/endpoint ID, attempt, event age, outcome
+      ├─ db.claim_delivery
+      ├─ ratelimit.endpoint
+      ├─ webhook.send          client span; destination host and status code only
+      └─ delivery.record       attempt + new state, then ack or schedule
+```
+
+The API and worker are separate processes joined only by a delivery ID in Redis, so the link is stored with the event:
+`events.trace_context` holds the ingestion span's W3C `traceparent`, and the worker reads it back with the row claim
+(ADR-029). A retry or a replay hours later therefore lands in the same trace. `TestOneEventIsOneTraceAcrossAPIAndWorker`
+asserts the single trace ID, the parent links, and that no span contains the payload, the secret, the API key or the
+URL path. Exporters: `stdout` or OTLP/HTTP; spans are batched in the background so a dead collector cannot slow a
+delivery. With `EM_TRACE_EXPORTER=none` no provider is installed and every span call is a no-op. Only the in-memory
+exporter (in tests) and `stdout` were exercised; no OTLP collector was run.
+
+## Caching
+
+One thing is cached: dashboard statistics (`GET /dashboard/stats`), in Redis, for `EM_STATS_CACHE_TTL` (5 s), with an
+`X-Cache: HIT|MISS|BYPASS` response header. It is a TTL cache with no invalidation, per-user keys, single-flight on
+concurrent misses and fail-open on Redis errors; the reasoning is ADR-028 and the measurements are in
+`docs/performance.md`. Everything else is read from PostgreSQL on every request, because lists and detail pages must be
+current and their indexed queries already take well under a millisecond (`docs/database.md`).
+
 ## AI features (milestone 11, optional)
 
 They sit beside the delivery path, never in it: `backend/internal/ai` is imported only by the API router, so workers, the

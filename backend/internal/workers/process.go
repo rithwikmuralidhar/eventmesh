@@ -5,13 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"eventmesh/internal/database"
 	"eventmesh/internal/database/db"
 	"eventmesh/internal/deliveries"
+	"eventmesh/internal/observability"
 	"eventmesh/internal/ratelimit"
 	"eventmesh/internal/realtime"
 	"eventmesh/internal/retry"
@@ -40,6 +45,7 @@ func (p *Pool) process(ctx context.Context, workerID, rawID string) {
 
 	// Layer two of the double-processing protection: the row claim in
 	// PostgreSQL. Redis only said "you may look at this one".
+	claimStart := time.Now()
 	row, err := p.queries.ClaimDelivery(ctx, db.ClaimDeliveryParams{
 		WorkerID: &workerID, LeaseSeconds: p.cfg.Lease.Seconds(), ID: id,
 	})
@@ -54,6 +60,29 @@ func (p *Pool) process(ctx context.Context, workerID, rawID string) {
 		return
 	}
 	log = log.With("event_id", row.EventID.String(), "endpoint_id", row.EndpointID.String())
+
+	// Join the trace of the ingestion request that created this event. The
+	// span starts at claimStart: the claim had to happen before the parent
+	// was known, so it is recorded after the fact as a child span.
+	claimEnd := time.Now()
+	if row.TraceContext != nil {
+		ctx = observability.ExtractTraceContext(ctx, *row.TraceContext)
+	}
+	ctx, span := observability.Tracer().Start(ctx, "delivery.process",
+		trace.WithTimestamp(claimStart), trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(
+			attribute.String("eventmesh.delivery_id", row.ID.String()),
+			attribute.String("eventmesh.event_id", row.EventID.String()),
+			attribute.String("eventmesh.endpoint_id", row.EndpointID.String()),
+			attribute.String("eventmesh.event_type", row.EventType),
+			attribute.Int("eventmesh.attempt", int(row.AttemptCount)+1),
+			// How long the event existed before this attempt began: queue wait on
+			// a first attempt, queue wait plus backoff on a retry.
+			attribute.Int64("eventmesh.event_age_ms", claimStart.Sub(row.EventCreatedAt).Milliseconds()),
+		))
+	defer span.End()
+	_, claimSpan := observability.Tracer().Start(ctx, "db.claim_delivery", trace.WithTimestamp(claimStart))
+	claimSpan.End(trace.WithTimestamp(claimEnd))
 
 	// A disabled or deleted endpoint gets nothing, even for deliveries that
 	// were created while it was still active.
@@ -84,10 +113,19 @@ func (p *Pool) process(ctx context.Context, workerID, rawID string) {
 
 	attemptNumber := int(row.AttemptCount) + 1
 	started := p.deps.Clock.Now()
-	result := p.deps.Sender.Send(ctx, webhook.Request{
+	sendCtx, sendSpan := observability.Tracer().Start(ctx, "webhook.send", trace.WithSpanKind(trace.SpanKindClient))
+	result := p.deps.Sender.Send(sendCtx, webhook.Request{
 		URL: row.Url, Secret: secret, EventID: row.EventID, EventType: row.EventType,
 		DeliveryID: row.ID, Attempt: attemptNumber, Timestamp: started, Body: body,
 	})
+	// Host only: the path and query of a customer URL can carry secrets.
+	sendSpan.SetAttributes(attribute.String("server.address", hostOf(row.Url)))
+	if result.Err != nil {
+		sendSpan.SetStatus(codes.Error, "request failed")
+	} else {
+		sendSpan.SetAttributes(attribute.Int("http.response.status_code", result.StatusCode))
+	}
+	sendSpan.End()
 	p.record(ctx, log, workerID, row, started, result)
 }
 
@@ -128,6 +166,8 @@ func (p *Pool) cancel(ctx context.Context, log *slog.Logger, workerID string, ro
 // back to pending with a later due time, with no attempt and no retry count.
 func (p *Pool) takeEndpointToken(ctx context.Context, log *slog.Logger, workerID string, row db.ClaimDeliveryRow) bool {
 	rate := int(row.RateLimitPerSecond)
+	ctx, limSpan := observability.Tracer().Start(ctx, "ratelimit.endpoint")
+	defer limSpan.End()
 	decision, err := p.deps.Limiter.Allow(ctx, ratelimit.EndpointKey(row.EndpointID.String()), float64(rate), rate)
 	if err != nil {
 		// The limiter protects the receiver, not us; if Redis hiccups we send.
@@ -239,6 +279,10 @@ func (p *Pool) record(ctx context.Context, log *slog.Logger, workerID string, ro
 	recCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 
+	recCtx, recSpan := observability.Tracer().Start(recCtx, "delivery.record")
+	defer recSpan.End()
+	trace.SpanFromContext(ctx).SetAttributes(
+		attribute.String("eventmesh.outcome", string(status)), attribute.String("eventmesh.error_category", class.Category))
 	lost := false
 	err := database.InTx(recCtx, p.deps.DB, func(q *db.Queries) error {
 		// Fencing: only the worker that still owns the row may write its result.
@@ -384,4 +428,13 @@ func (p *Pool) reportDepths(ctx context.Context) error {
 	g.WithLabelValues("delayed").Set(float64(d.Delayed))
 	g.WithLabelValues("processing").Set(float64(d.Processing))
 	return nil
+}
+
+// hostOf returns the host[:port] of a URL for span attributes, or "unknown".
+func hostOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "unknown"
+	}
+	return u.Host
 }

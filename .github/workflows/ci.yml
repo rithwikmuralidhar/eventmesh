@@ -137,3 +137,20 @@ jobs:
       - name: Logs on failure
         if: failure()
         run: tail -n 100 api.log worker.log receiver.log
+
+  # Builds the image and runs the whole stack in containers, then delivers one event through it.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image and start the stack
+        run: docker compose -f docker-compose.app.yml up --build -d
+      - name: Smoke test (register, endpoint, event, delivered)
+        run: bash scripts/docker-smoke.sh
+      - name: Image runs as a non-root user
+        run: |
+          docker image ls eventmesh:local
+          test "$(docker run --rm eventmesh:local id -u)" != "0"
+      - name: Logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.app.yml ps -a && docker compose -f docker-compose.app.yml logs --tail 100

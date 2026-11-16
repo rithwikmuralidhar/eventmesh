@@ -1,0 +1,12 @@
+# Keep the build context small and keep secrets out of image layers.
+.git
+.env
+.tools
+.run
+bin
+logs
+loadtest-results
+**/node_modules
+frontend/dist
+frontend/test-results
+**/*.exe

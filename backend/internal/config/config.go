@@ -35,6 +35,8 @@ type Config struct {
 	RedisKeyPrefix string
 	// ServeFrontend makes the API serve the built SPA from FrontendDir.
 	ServeFrontend bool
+	// StatsCacheTTL is how long dashboard statistics are served from Redis; 0 disables the cache.
+	StatsCacheTTL time.Duration
 	FrontendDir   string
 
 	DatabaseURL string
@@ -48,6 +50,7 @@ type Config struct {
 	SessionTTL          time.Duration
 
 	WorkerCount     int
+	DispatcherCount int // goroutines claiming jobs from Redis for the worker pool
 	ShutdownTimeout time.Duration
 
 	MaxRetries        int
@@ -75,6 +78,9 @@ type Config struct {
 	APIBaseURL      string
 	DemoEventCount  int
 
+	// Tracing is the OpenTelemetry configuration; off by default.
+	Tracing Tracing
+
 	// AI is the optional milestone 11 configuration; off by default.
 	AI AI
 }
@@ -93,6 +99,7 @@ func Load(getenv func(string) string) (Config, error) {
 		WorkerMetricsAddr: "127.0.0.1:" + strconv.Itoa(r.integer("WORKER_METRICS_PORT", 9091, 1, 65535)),
 		RedisKeyPrefix:    r.str("REDIS_KEY_PREFIX", "em"),
 		ServeFrontend:     r.boolean("SERVE_FRONTEND", false),
+		StatsCacheTTL:     r.duration("STATS_CACHE_TTL", 5*time.Second, 0, 5*time.Minute),
 		FrontendDir:       r.str("FRONTEND_DIR", "../frontend/dist"),
 
 		DatabaseURL: r.str("DATABASE_URL", "postgres://eventmesh:eventmesh@127.0.0.1:5432/eventmesh?sslmode=disable"),
@@ -103,6 +110,7 @@ func Load(getenv func(string) string) (Config, error) {
 		SessionTTL:         r.duration("SESSION_TTL", 7*24*time.Hour, time.Minute, 90*24*time.Hour),
 
 		WorkerCount:     r.integer("WORKER_COUNT", 10, 1, 1000),
+		DispatcherCount: r.integer("DISPATCHER_COUNT", 1, 1, 64),
 		ShutdownTimeout: r.duration("SHUTDOWN_TIMEOUT", 20*time.Second, time.Second, 10*time.Minute),
 
 		MaxRetries:        r.integer("MAX_RETRIES", 5, 0, 20),
@@ -133,6 +141,7 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 
 	cfg.AI = loadAI(r)
+	cfg.Tracing = loadTracing(r)
 	cfg.CookieSecure = cfg.Env == EnvProduction // development runs over plain HTTP
 	keyB64 := r.str("SECRET_ENCRYPTION_KEY", DevSecretEncryptionKey)
 	key, err := base64.StdEncoding.DecodeString(keyB64)
@@ -275,4 +284,26 @@ func (r *reader) float(key string, def, lo, hi float64) float64 {
 		return def
 	}
 	return v
+}
+
+// Tracing is the OpenTelemetry configuration (off by default).
+type Tracing struct {
+	Exporter     string
+	OTLPEndpoint string
+	SampleRatio  float64
+}
+
+func loadTracing(r *reader) Tracing {
+	t := Tracing{
+		Exporter:     strings.ToLower(r.str("TRACE_EXPORTER", "none")),
+		OTLPEndpoint: r.str("TRACE_OTLP_ENDPOINT", "127.0.0.1:4318"),
+		SampleRatio:  r.float("TRACE_SAMPLE_RATIO", 1, 0, 1),
+	}
+	switch t.Exporter {
+	case "none", "stdout", "otlp":
+	default:
+		r.fail("TRACE_EXPORTER must be none, stdout or otlp, got " + t.Exporter)
+		t.Exporter = "none"
+	}
+	return t
 }

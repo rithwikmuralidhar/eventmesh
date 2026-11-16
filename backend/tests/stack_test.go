@@ -102,6 +102,7 @@ func newStack(t *testing.T, o overrides, mods ...func(*httpapi.Deps)) *stack {
 		"EM_API_RATE_LIMIT": "10000", "EM_API_RATE_BURST": "10000", "EM_INGEST_RATE_LIMIT": "10000", "EM_INGEST_RATE_BURST": "10000",
 		"EM_RECONCILER_GRACE": "300ms", "EM_RECONCILER_INTERVAL": "200ms", "EM_REAPER_INTERVAL": "200ms",
 		"EM_SCHEDULER_INTERVAL": "20ms",
+		"EM_STATS_CACHE_TTL":    "0", // statistics are read fresh unless a test opts in
 	}
 	for k, v := range o {
 		env[k] = v

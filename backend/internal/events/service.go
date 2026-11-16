@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 
 	"eventmesh/internal/database"
 	"eventmesh/internal/database/db"
@@ -83,8 +85,19 @@ var errKeyTaken = errors.New("idempotency key already used")
 // Ingest validates and stores an event, creates its deliveries, and hands
 // them to the queue. It never waits for a delivery.
 func (s *Service) Ingest(ctx context.Context, userID uuid.UUID, in IngestInput) (IngestResult, error) {
+	ctx, span := observability.Tracer().Start(ctx, "events.ingest")
+	defer span.End()
 	result, err := s.ingest(ctx, userID, in)
-	s.metrics.EventsIngested.WithLabelValues(resultLabel(result, err)).Inc()
+	label := resultLabel(result, err)
+	s.metrics.EventsIngested.WithLabelValues(label).Inc()
+	// IDs are fine as span attributes (unlike metric labels): a trace is one
+	// record, not a time series per distinct value. The payload is never recorded.
+	span.SetAttributes(attribute.String("eventmesh.ingest.result", label), attribute.String("eventmesh.event_type", in.EventType))
+	if err == nil {
+		span.SetAttributes(attribute.String("eventmesh.event_id", result.ID.String()), attribute.Int("eventmesh.deliveries", result.Deliveries))
+	} else if label == ResultError {
+		span.SetStatus(codes.Error, "ingest failed")
+	}
 	return result, err
 }
 
@@ -160,10 +173,18 @@ func (s *Service) insert(ctx context.Context, userID uuid.UUID, in IngestInput, 
 
 	var result IngestResult
 	var deliveryIDs []string
+	// The traceparent is stored with the event so the worker, in another process
+	// and possibly minutes later, can attach its delivery spans to this trace.
+	var traceContext *string
+	if tc := observability.InjectTraceContext(ctx); tc != "" {
+		traceContext = &tc
+	}
+	ctx, txSpan := observability.Tracer().Start(ctx, "db.ingest_tx")
+	defer txSpan.End()
 	err = database.InTx(ctx, s.pool, func(q *db.Queries) error {
 		row, err := q.InsertEvent(ctx, db.InsertEventParams{
 			ID: eventID, UserID: userID, EventType: in.EventType, Payload: canonical,
-			IdempotencyKey: idempotencyKey, RequestHash: requestHash,
+			IdempotencyKey: idempotencyKey, RequestHash: requestHash, TraceContext: traceContext,
 		})
 		if database.IsNotFound(err) {
 			// ON CONFLICT DO NOTHING returned no row: the unique constraint on
@@ -226,10 +247,12 @@ func (s *Service) afterCommit(ctx context.Context, userID uuid.UUID, result Inge
 	bg := context.WithoutCancel(ctx)
 	if len(deliveryIDs) > 0 {
 		enqueueCtx, cancel := context.WithTimeout(bg, 2*time.Second)
+		enqueueCtx, qSpan := observability.Tracer().Start(enqueueCtx, "queue.enqueue")
 		if err := s.enqueuer.Enqueue(enqueueCtx, deliveryIDs...); err != nil {
 			observability.Logger(ctx).Warn("enqueue after commit failed; the reconciler will pick the deliveries up",
 				"event_id", result.ID.String(), "deliveries", len(deliveryIDs), "error", err.Error())
 		}
+		qSpan.End()
 		cancel()
 	}
 	s.publisher.Publish(bg, userID, realtime.Update{

@@ -1,0 +1,72 @@
+# The whole stack in containers: PostgreSQL (with pgvector), Redis, migrations, API + UI, worker, demo receiver.
+#   docker compose -f docker-compose.app.yml up --build -d
+#   open http://127.0.0.1:8090        (register an account, or run the seed: see below)
+#   docker compose -f docker-compose.app.yml down -v
+# Development settings only: default passwords, the public dev encryption key, and an SSRF exemption for the
+# in-network demo receiver. docker-compose.yml (PostgreSQL and Redis only) is unchanged and independent of this file.
+x-app: &app
+  build: .
+  image: eventmesh:local
+  environment: &env
+    EM_ENV: development
+    EM_DATABASE_URL: postgres://eventmesh:eventmesh@postgres:5432/eventmesh?sslmode=disable
+    EM_REDIS_URL: redis://redis:6379/0
+    # Inside a container the process must listen on all interfaces; the host publishes only what `ports` lists.
+    EM_HTTP_ADDR: 0.0.0.0:8090
+    EM_RECEIVER_ADDR: 0.0.0.0:9000
+    EM_SERVE_FRONTEND: 'true'
+    # The demo receiver has a private address, which the SSRF policy would refuse. Development only.
+    EM_SSRF_ALLOWED_HOSTS: receiver
+    EM_RECEIVER_BASE_URL: http://receiver:9000
+    EM_RECEIVER_SECRET: whsec_compose_demo_secret_not_for_production
+    EM_API_BASE_URL: http://api:8090
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment: { POSTGRES_USER: eventmesh, POSTGRES_PASSWORD: eventmesh, POSTGRES_DB: eventmesh }
+    volumes: ['pgdata:/var/lib/postgresql/data']
+    healthcheck: { test: ['CMD-SHELL', 'pg_isready -U eventmesh'], interval: 3s, timeout: 3s, retries: 20 }
+  redis:
+    image: redis:7
+    healthcheck: { test: ['CMD', 'redis-cli', 'ping'], interval: 3s, timeout: 3s, retries: 20 }
+
+  # Runs once and exits; the api and worker wait for it to succeed.
+  migrate:
+    <<: *app
+    command: ['migrate']
+    restart: 'no'
+    depends_on: { postgres: { condition: service_healthy } }
+
+  api:
+    <<: *app
+    command: ['api']
+    ports: ['127.0.0.1:8090:8090']
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck: { test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:8090/readyz'], interval: 3s, timeout: 3s, retries: 20 }
+
+  worker:
+    <<: *app
+    command: ['worker']
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  receiver:
+    <<: *app
+    command: ['receiver']
+    ports: ['127.0.0.1:9000:9000']
+
+  # Optional demo data: docker compose -f docker-compose.app.yml --profile seed run --rm seed
+  seed:
+    <<: *app
+    profiles: ['seed']
+    command: ['seed']
+    restart: 'no'
+    depends_on: { api: { condition: service_healthy } }
+
+volumes:
+  pgdata:

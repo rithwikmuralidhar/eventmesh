@@ -119,8 +119,8 @@ func (q *Queries) InsertDeliveries(ctx context.Context, arg InsertDeliveriesPara
 }
 
 const insertEvent = `-- name: InsertEvent :one
-INSERT INTO events (id, user_id, event_type, payload, idempotency_key, request_hash)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO events (id, user_id, event_type, payload, idempotency_key, request_hash, trace_context)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
 RETURNING id, created_at
 `
@@ -132,6 +132,7 @@ type InsertEventParams struct {
 	Payload        json.RawMessage
 	IdempotencyKey *string
 	RequestHash    []byte
+	TraceContext   *string
 }
 
 type InsertEventRow struct {
@@ -151,6 +152,7 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) (Inser
 		arg.Payload,
 		arg.IdempotencyKey,
 		arg.RequestHash,
+		arg.TraceContext,
 	)
 	var i InsertEventRow
 	err := row.Scan(&i.ID, &i.CreatedAt)

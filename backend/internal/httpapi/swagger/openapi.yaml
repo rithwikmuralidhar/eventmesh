@@ -423,6 +423,7 @@ paths:
       tags: [Dashboard]
       security: [{ session: [] }]
       summary: Totals, success rate, time series and recent failures
+      description: Served from a Redis cache for `EM_STATS_CACHE_TTL` (default 5 s), so numbers can be that stale. The `X-Cache` response header is `HIT`, `MISS` or `BYPASS` (cache off).
       parameters:
         - { name: range, in: query, schema: { type: string, enum: [24h, 7d, 30d], default: 24h } }
       responses: { "200": { description: OK } }

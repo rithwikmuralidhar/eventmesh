@@ -13,6 +13,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	"eventmesh/internal/httpx"
 	"eventmesh/internal/observability"
@@ -35,6 +38,9 @@ func RequestContext(base *slog.Logger, observe RequestObserver) gin.HandlerFunc 
 		c.Header("X-Request-Id", requestID)
 
 		logger := base.With("request_id", requestID)
+		if traceID := observability.TraceID(c.Request.Context()); traceID != "" {
+			logger = logger.With("trace_id", traceID)
+		}
 		c.Request = c.Request.WithContext(observability.WithLogger(c.Request.Context(), logger))
 
 		c.Next()
@@ -202,3 +208,36 @@ func ByClientIP(c *gin.Context) string { return ratelimit.APIKey(c.ClientIP()) }
 
 // ByUser keys a limit by the authenticated user.
 func ByUser(c *gin.Context) string { return ratelimit.IngestKey(httpx.UserID(c).String()) }
+
+// Tracing starts one server span per request. It continues the caller's trace
+// when the request carries a W3C traceparent header and starts a new one
+// otherwise. It must be installed before RequestContext so the request log
+// line can carry the trace ID.
+//
+// The span is named after the route template, never the raw path, and records
+// no headers, query string or body: those can hold credentials and payloads.
+func Tracing() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx := observability.ExtractTraceContext(c.Request.Context(), c.GetHeader("traceparent"))
+		ctx, span := observability.Tracer().Start(ctx, "HTTP "+c.Request.Method, trace.WithSpanKind(trace.SpanKindServer))
+		defer span.End()
+		c.Request = c.Request.WithContext(ctx)
+
+		c.Next()
+
+		route := c.FullPath()
+		if route == "" {
+			route = "unmatched"
+		}
+		status := c.Writer.Status()
+		span.SetName(c.Request.Method + " " + route)
+		span.SetAttributes(
+			attribute.String("http.request.method", c.Request.Method),
+			attribute.String("http.route", route),
+			attribute.Int("http.response.status_code", status),
+		)
+		if status >= 500 {
+			span.SetStatus(codes.Error, http.StatusText(status))
+		}
+	}
+}

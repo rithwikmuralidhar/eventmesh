@@ -42,6 +42,19 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	shutdownTracing, err := observability.SetupTracing(ctx, "api", observability.TracingConfig{
+		Exporter: cfg.Tracing.Exporter, OTLPEndpoint: cfg.Tracing.OTLPEndpoint, SampleRatio: cfg.Tracing.SampleRatio,
+	}, os.Stderr)
+	if err != nil {
+		return err
+	}
+	// Flush buffered spans on the way out, on a context that outlives ctx.
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(flushCtx)
+	}()
+
 	pool, err := database.Connect(ctx, cfg.DatabaseURL, cfg.PoolSize(false))
 	if err != nil {
 		return err
