@@ -112,6 +112,15 @@ That starts PostgreSQL (with pgvector), Redis, a one-shot migration, the API wit
 `docker compose -f docker-compose.app.yml down -v`. Development settings only (default passwords, public dev key).
 `docker-compose.yml` is separate and only starts PostgreSQL and Redis for the native workflow.
 
+
+## Self-hosting (public, free)
+
+[docs/self-hosting.md](docs/self-hosting.md) puts the stack on the internet from a Linux PC with HTTPS, using a
+Tailscale Funnel tunnel (no port forwarding). `docker-compose.prod.yml` adds production settings on top of
+`docker-compose.app.yml`: random secrets in a git-ignored `.env.prod`, `EM_ENV=production`, closed registration,
+trusted-proxy client IPs, read-only unprivileged containers, no demo receiver. `scripts/prod.sh` wraps init, start,
+logs and backups; the CI `docker-prod` job runs it and `scripts/docker-prod-smoke.sh`.
+
 ## Observability
 
 Structured JSON logs with a request ID (and a trace ID when tracing is on), Prometheus metrics on `:9090` (API) and

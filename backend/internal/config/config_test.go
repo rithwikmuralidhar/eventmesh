@@ -29,6 +29,11 @@ func TestLoadDefaults(t *testing.T) {
 	assert.Empty(t, cfg.SSRFAllowedHosts, "SSRF allowlist must be empty by default")
 	assert.Equal(t, []string{"http://127.0.0.1:3000", "http://localhost:3000"}, cfg.CORSAllowedOrigins)
 	assert.Len(t, cfg.SecretEncryptionKey, 32)
+	assert.True(t, cfg.AllowRegistration, "registration is open unless closed explicitly")
+
+	closed, err := Load(env(map[string]string{"ALLOW_REGISTRATION": "false"}))
+	require.NoError(t, err)
+	assert.False(t, closed.AllowRegistration)
 }
 
 func TestLoadReportsEveryProblemAtOnce(t *testing.T) {

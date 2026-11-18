@@ -8,3 +8,7 @@ frontend/dist/
 loadtest-results/
 .claude/
 .tools/
+
+# Production secrets and database dumps (scripts/prod.sh)
+.env.prod
+backups/

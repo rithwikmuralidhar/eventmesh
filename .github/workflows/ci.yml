@@ -154,3 +154,20 @@ jobs:
       - name: Logs on failure
         if: failure()
         run: docker compose -f docker-compose.app.yml ps -a && docker compose -f docker-compose.app.yml logs --tail 100
+
+  # The self-hosting setup (docs/self-hosting.md): production settings, secrets, hardening, backups.
+  docker-prod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create secrets and start the production stack
+        run: |
+          bash scripts/prod.sh init https://eventmesh.example.test
+          bash scripts/prod.sh up
+      - name: Production smoke test
+        run: bash scripts/docker-prod-smoke.sh
+      - name: Logs on failure
+        if: failure()
+        run: |
+          c="docker compose --env-file .env.prod -f docker-compose.app.yml -f docker-compose.prod.yml"
+          $c ps -a && $c logs --tail 100

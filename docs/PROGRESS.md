@@ -67,6 +67,7 @@ Not verified or not done in this pass:
 - UI, checked by hand in the in-app browser on 2026-11-12: endpoint create (one-time secret), rotate (confirm dialog, new secret) and delete (confirm dialog, row gone); light theme and 375 px width on all 7 pages. That pass found one bug, now fixed: the Overview cards were 437 px wide on a 375 px screen (`min-w-0` added to `Card`). The AI controls were not exercised in a browser (no key, flags off); they are covered by Vitest only.
 - `start-stack.ps1`: run as a background command from the assistant tool it returned and exited 0 with the stack up (ready check passed); the foreground hang seen earlier was not reproduced. Not run in a plain interactive terminal by a person.
 - Performance: single runs, no repeats; the bottleneck above ~10 workers is *not* isolated (see performance.md).
+- Self-hosting (2026-11-19): `docker-compose.prod.yml`, `scripts/prod.sh`, `docs/self-hosting.md`, `EM_ALLOW_REGISTRATION`, security headers. Verified locally: unit and integration tests (`tests/hardening_test.go`, 3 tests), golangci-lint, `docker compose config` of the merged files. **Not run locally** (Docker engine broken on this PC): the production stack itself, which the new CI job `docker-prod` (`scripts/docker-prod-smoke.sh`) checks. Not tested anywhere: Tailscale Funnel in front of it (that X-Forwarded-For is overwritten was read from Tailscale's `ipn/ipnlocal/serve.go`, not observed).
 
 ## Next action
 

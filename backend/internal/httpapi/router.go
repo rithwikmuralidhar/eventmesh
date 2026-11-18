@@ -74,7 +74,8 @@ func New(d Deps) (*gin.Engine, *realtime.Hub, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	authH := auth.NewHandler(authService, limiter, cfg.CookieSecure, cfg.AuthRateLimit)
+	authH := auth.NewHandler(authService, limiter, cfg.CookieSecure, cfg.AuthRateLimit).
+		WithRegistration(cfg.AllowRegistration)
 	keysH := apikeys.NewHandler(apikeys.NewService(d.Pool, clk))
 	policy := ssrf.NewPolicy(cfg.SSRFAllowedHosts, nil)
 	endpointsH := endpoints.NewHandler(endpoints.NewService(d.Pool, cipher, policy, d.Publisher))
@@ -97,6 +98,7 @@ func New(d Deps) (*gin.Engine, *realtime.Hub, error) {
 		middleware.Tracing(),
 		middleware.RequestContext(d.Logger, d.Metrics.ObserveHTTP),
 		middleware.Recover(),
+		middleware.SecurityHeaders(cfg.CookieSecure),
 		middleware.CORS(cfg.CORSAllowedOrigins),
 		middleware.RateLimit(limiter, middleware.RateLimitConfig{
 			Scope: "api", Rate: cfg.APIRateLimit, Burst: cfg.APIRateBurst,

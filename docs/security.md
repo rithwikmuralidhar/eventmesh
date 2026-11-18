@@ -119,6 +119,13 @@ production refuses development defaults. Logs never contain passwords, API keys,
 signatures or event payloads; `TestLogsNeverContainSecretsOrPayloads` captures the API and worker logs through a
 delivery and a failure and asserts their absence.
 
+Every response carries `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+`Content-Security-Policy: frame-ancestors 'none'` and `Referrer-Policy: strict-origin-when-cross-origin`; production
+adds `Strict-Transport-Security`. `EM_ALLOW_REGISTRATION=false` closes sign-up for a single-owner deployment.
+`EM_TRUSTED_PROXIES` names the tunnel or proxy whose `X-Forwarded-For` is believed; without it, everyone behind a
+tunnel shares one rate-limit bucket. The public self-hosting setup and its container hardening are in
+[self-hosting.md](self-hosting.md); `tests/hardening_test.go` covers these three settings.
+
 ## AI features
 
 Milestone 11, optional, **off by default**.

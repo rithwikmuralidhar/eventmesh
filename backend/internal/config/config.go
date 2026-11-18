@@ -48,6 +48,8 @@ type Config struct {
 	CORSAllowedOrigins  []string
 	CookieSecure        bool
 	SessionTTL          time.Duration
+	// AllowRegistration lets anyone create an account; false closes sign-up.
+	AllowRegistration bool
 
 	WorkerCount     int
 	DispatcherCount int // goroutines claiming jobs from Redis for the worker pool
@@ -108,6 +110,7 @@ func Load(getenv func(string) string) (Config, error) {
 
 		CORSAllowedOrigins: r.list("CORS_ALLOWED_ORIGINS", "http://127.0.0.1:3000,http://localhost:3000"),
 		SessionTTL:         r.duration("SESSION_TTL", 7*24*time.Hour, time.Minute, 90*24*time.Hour),
+		AllowRegistration:  r.boolean("ALLOW_REGISTRATION", true),
 
 		WorkerCount:     r.integer("WORKER_COUNT", 10, 1, 1000),
 		DispatcherCount: r.integer("DISPATCHER_COUNT", 1, 1, 64),

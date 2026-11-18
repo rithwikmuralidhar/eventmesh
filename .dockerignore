@@ -10,3 +10,6 @@ loadtest-results
 frontend/dist
 frontend/test-results
 **/*.exe
+.env.*
+!.env.example
+backups

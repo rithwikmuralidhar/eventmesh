@@ -22,6 +22,24 @@ import (
 	"eventmesh/internal/ratelimit"
 )
 
+// SecurityHeaders sets the browser hardening headers on every response:
+// no MIME sniffing, no framing (clickjacking), and no full URLs leaked in
+// the Referer header to other sites. With hsts true (production, served over
+// HTTPS) browsers are also told to use HTTPS only for the next 180 days.
+func SecurityHeaders(hsts bool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		h := c.Writer.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		if hsts {
+			h.Set("Strict-Transport-Security", "max-age=15552000")
+		}
+		c.Next()
+	}
+}
+
 // RequestObserver receives one observation per finished request; the API
 // passes the Prometheus histogram's recorder.
 type RequestObserver func(route, method string, status int, duration time.Duration)

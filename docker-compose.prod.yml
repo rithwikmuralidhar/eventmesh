@@ -1,0 +1,106 @@
+# Production settings, layered ON TOP of docker-compose.app.yml. Never use this file on its own.
+#
+#   ./scripts/prod.sh init      # once: writes .env.prod with random secrets
+#   ./scripts/prod.sh up        # build and start
+#
+# which runs:
+#   docker compose --env-file .env.prod -f docker-compose.app.yml -f docker-compose.prod.yml up --build -d
+#
+# What this changes compared with the development stack:
+#   - EM_ENV=production: the app refuses to start with any development default, and cookies are HTTPS-only.
+#   - Real random secrets (database, Redis, encryption key) come from .env.prod, which git ignores.
+#   - New data volume, so the development database (with its dev password) is never reused.
+#   - The demo receiver is off and the SSRF exemption for it is removed.
+#   - Containers run read-only, with no Linux capabilities and no privilege escalation.
+#   - A fixed internal network, so the tunnel's address can be trusted for visitor IPs (rate limiting).
+#   - Log files are size-capped so a busy day cannot fill the disk.
+# Only the API is reachable from the host, and only on 127.0.0.1:8090 (from docker-compose.app.yml).
+# The tunnel (Tailscale Funnel, see docs/self-hosting.md) is what makes it public.
+
+x-hardening: &hardening
+  read_only: true
+  tmpfs: ['/tmp']
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+  logging: &logging
+    driver: json-file
+    options: { max-size: '10m', max-file: '5' }
+
+x-prod-env: &prod-env
+  EM_ENV: production
+  EM_DATABASE_URL: postgres://eventmesh:${EM_PROD_DB_PASSWORD:?run scripts/prod.sh init first}@postgres:5432/eventmesh?sslmode=disable
+  EM_REDIS_URL: redis://:${EM_PROD_REDIS_PASSWORD:?run scripts/prod.sh init first}@redis:6379/0
+  EM_HTTP_ADDR: 0.0.0.0:8090
+  EM_SERVE_FRONTEND: 'true'
+  EM_SECRET_ENCRYPTION_KEY: ${EM_PROD_ENCRYPTION_KEY:?run scripts/prod.sh init first}
+  # The public https:// address. Must match exactly what visitors type, or every form POST is refused (CSRF check).
+  EM_CORS_ALLOWED_ORIGINS: ${EM_PUBLIC_URL:?set EM_PUBLIC_URL in .env.prod}
+  EM_API_BASE_URL: ${EM_PUBLIC_URL}
+  # Development-only exemption for the demo receiver. Production refuses to start if it is set.
+  EM_SSRF_ALLOWED_HOSTS: ''
+  EM_RECEIVER_BASE_URL: ''
+  EM_RECEIVER_SECRET: ''
+  # Requests reach the API from the tunnel through Docker's gateway on this network. Trusting it means the
+  # visitor's IP is read from X-Forwarded-For (set by the tunnel), so each visitor gets their own rate limit.
+  EM_TRUSTED_PROXIES: ${EM_PROD_SUBNET:-172.31.240.0/24}
+  # true while you create your own account, then false (and ./scripts/prod.sh up again).
+  EM_ALLOW_REGISTRATION: ${EM_ALLOW_REGISTRATION:-false}
+  EM_SESSION_TTL: 72h
+  # Optional AI features stay off unless .env.prod turns them on.
+  EM_AI_PROVIDER: ${EM_AI_PROVIDER:-}
+  EM_AI_API_KEY: ${EM_AI_API_KEY:-}
+  EM_FEATURE_AI_DOCS: ${EM_FEATURE_AI_DOCS:-false}
+  EM_FEATURE_AI_EXPLAIN: ${EM_FEATURE_AI_EXPLAIN:-false}
+  EM_FEATURE_AI_SEARCH: ${EM_FEATURE_AI_SEARCH:-false}
+
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${EM_PROD_DB_PASSWORD:?run scripts/prod.sh init first}
+    volumes: !override ['pgdata_prod:/var/lib/postgresql/data']
+    security_opt: ['no-new-privileges:true']
+    logging: *logging
+    restart: unless-stopped
+
+  redis:
+    # Going through the image's entrypoint keeps its switch from root to the unprivileged redis user.
+    # Redis holds only rebuildable dispatch state (PostgreSQL is the source of truth); appendonly just
+    # avoids a full rebuild by the reconciler after every restart.
+    environment:
+      REDIS_PASSWORD: ${EM_PROD_REDIS_PASSWORD:?run scripts/prod.sh init first}
+    command: ['sh', '-c', 'exec docker-entrypoint.sh redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes']
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping | grep -q PONG']
+    volumes: ['redisdata_prod:/data']
+    security_opt: ['no-new-privileges:true']
+    logging: *logging
+    restart: unless-stopped
+
+  migrate:
+    <<: *hardening
+    environment: *prod-env
+
+  api:
+    <<: *hardening
+    environment: *prod-env
+
+  worker:
+    <<: *hardening
+    environment: *prod-env
+
+  # The demo receiver accepts webhooks from anyone; it has no place on a public server.
+  receiver:
+    profiles: ['demo']
+
+  seed:
+    profiles: ['never']
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${EM_PROD_SUBNET:-172.31.240.0/24}
+
+volumes:
+  pgdata_prod:
+  redisdata_prod:

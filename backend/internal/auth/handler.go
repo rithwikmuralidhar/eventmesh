@@ -24,11 +24,21 @@ type Handler struct {
 	// attemptsPerMinute bounds login and registration attempts, counted
 	// separately per client IP and per email address.
 	attemptsPerMinute int
+	// registrationClosed refuses new accounts (EM_ALLOW_REGISTRATION=false),
+	// for a public deployment that only its owner should use.
+	registrationClosed bool
 }
 
-// NewHandler returns the auth handler.
+// NewHandler returns the auth handler. Registration is open.
 func NewHandler(service *Service, limiter *ratelimit.Limiter, cookieSecure bool, attemptsPerMinute int) *Handler {
 	return &Handler{service: service, limiter: limiter, cookieSecure: cookieSecure, attemptsPerMinute: attemptsPerMinute}
+}
+
+// WithRegistration opens or closes POST /auth/register. Existing accounts can
+// always sign in.
+func (h *Handler) WithRegistration(open bool) *Handler {
+	h.registrationClosed = !open
+	return h
 }
 
 type credentialsRequest struct {
@@ -38,6 +48,10 @@ type credentialsRequest struct {
 
 // Register handles POST /auth/register.
 func (h *Handler) Register(c *gin.Context) {
+	if h.registrationClosed {
+		httpx.WriteError(c, httpx.NewError(http.StatusForbidden, "registration_closed", "Registration is closed on this server."))
+		return
+	}
 	var req credentialsRequest
 	if err := httpx.DecodeJSON(c, &req); err != nil {
 		httpx.WriteError(c, err)
