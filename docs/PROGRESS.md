@@ -1,6 +1,6 @@
 # EventMesh progress
 
-Specification: [PROMPT.md](PROMPT.md). Project root: `C:\Users\Testing\Desktop\eventmesh\eventmesh` (nested folder).
+Specification: `docs/PROMPT.md` (kept locally, not in git; likewise `docs/interview-prep.md` and `docs/interview-guide.md`). Project root: `C:\Users\Testing\Desktop\eventmesh\eventmesh` (nested folder).
 
 ## Status (checkpoint 2026-11-16, sixth session): milestones 1-11 built, fundamentals pass added
 
@@ -40,7 +40,7 @@ Added after milestone 11, each with its evidence:
 | Tracing | OpenTelemetry spans in the API and worker, `events.trace_context` (migration 000003), trace ID in logs, `EM_TRACE_*` | `tests/tracing_test.go` (3 tests, in-memory exporter); `stdout` exporter run once by hand |
 | Docker | `Dockerfile`, `.dockerignore`, `docker-compose.app.yml`, `scripts/docker-smoke.sh`, CI job `docker` | CI run 43897123868 (commit 553eff3, 2026-11-16): image built, stack started, `/readyz` ok, UI served, one event delivered through the containers, image runs as non-root. Never run on the development machine (its Docker engine returned HTTP 500) |
 | Bottleneck | `backend/bench/drain.sh`, `EM_DISPATCHER_COUNT`, "Finding the delivery ceiling" in `docs/performance.md` | 30 runs (10 configurations x 3) plus 3 CPU-sampled runs |
-| Interview document | `docs/interview-prep.md` | Facts checked against the code and the measurements above |
+| Interview document | `docs/interview-prep.md` (local only) | Facts checked against the code and the measurements above |
 
 Local verification after all of it: gofmt, `go vet`, golangci-lint (0 issues), `sqlc generate` (no diff), `go test -race ./...` with
 `EM_TEST_PGVECTOR=1` (all packages pass), `scripts\lint.ps1`, Vitest 14/14, `scripts\test-e2e.ps1` (Playwright 1 passed).

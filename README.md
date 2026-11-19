@@ -23,8 +23,8 @@ api: pub/sub -> Server-Sent Events -> dashboard
 
 PostgreSQL is the only source of truth. Redis holds dispatch state that the worker's reconciler can rebuild from
 PostgreSQL. Details: [architecture](docs/architecture.md), [database](docs/database.md), [reliability](docs/reliability.md),
-[security](docs/security.md), [decisions](docs/design-decisions.md), [performance](docs/performance.md),
-[interview guide](docs/interview-guide.md). API reference: [docs/openapi.yaml](docs/openapi.yaml), served at `/docs`.
+[security](docs/security.md), [decisions](docs/design-decisions.md), [performance](docs/performance.md).
+API reference: [docs/openapi.yaml](docs/openapi.yaml), served at `/docs`.
 
 ## Windows setup (native, no WSL, no Docker)
 

@@ -12,3 +12,8 @@ loadtest-results/
 # Production secrets and database dumps (scripts/prod.sh)
 .env.prod
 backups/
+
+# Personal documents kept on this PC only (never published)
+docs/PROMPT.md
+docs/interview-prep.md
+docs/interview-guide.md
