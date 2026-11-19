@@ -49,6 +49,8 @@ x-prod-env: &prod-env
   # Optional AI features stay off unless .env.prod turns them on.
   EM_AI_PROVIDER: ${EM_AI_PROVIDER:-}
   EM_AI_API_KEY: ${EM_AI_API_KEY:-}
+  EM_AI_CHAT_MODEL: ${EM_AI_CHAT_MODEL:-gemini-3.6-flash}
+  EM_AI_MIN_SIMILARITY: ${EM_AI_MIN_SIMILARITY:-}
   EM_FEATURE_AI_DOCS: ${EM_FEATURE_AI_DOCS:-false}
   EM_FEATURE_AI_EXPLAIN: ${EM_FEATURE_AI_EXPLAIN:-false}
   EM_FEATURE_AI_SEARCH: ${EM_FEATURE_AI_SEARCH:-false}
